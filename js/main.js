@@ -356,8 +356,8 @@ function panByScreen(dx, dy) {
 }
 
 function wantsPan(e) {
-  // Middle mouse, or Alt+left, or Space+left
-  return e.button === 1 || (e.button === 0 && (e.altKey || keys.Space));
+  // Middle mouse, or Alt+left-drag (Space stays spawn-only)
+  return e.button === 1 || (e.button === 0 && e.altKey);
 }
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
