@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>HENRI'S TORTURE GULAG</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800;900&family=IBM+Plex+Sans:wght@500;600;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <div id="app">
+    <header id="topbar">
+      <div class="brand">
+        <img id="logo-img" class="logo-img hidden" alt="Henri's Torture Gulag" width="40" height="40" />
+        <span class="logo logo-fallback">⚠</span>
+        <div>
+          <h1>HENRI'S TORTURE GULAG</h1>
+          <p class="tag">physics · maim · no mercy</p>
+        </div>
+      </div>
+      <div class="stats">
+        <div><span>INMATES</span><b id="stat-people">0</b></div>
+        <div><span>LIMBS LOST</span><b id="stat-limbs">0</b></div>
+        <div><span>KIA</span><b id="stat-kills">0</b></div>
+        <div><span>SUFFERING</span><b id="stat-chaos">0</b></div>
+        <div><span>BEST COMBO</span><b id="stat-combo">0</b></div>
+      </div>
+      <div class="top-actions">
+        <button type="button" id="btn-spawn" class="btn primary">+ INMATE</button>
+        <button type="button" id="btn-crowd" class="btn">BATCH</button>
+        <button type="button" id="btn-clear" class="btn danger">PURGE</button>
+        <button type="button" id="btn-pause" class="btn">PAUSE</button>
+      </div>
+    </header>
+
+    <div id="stage-wrap">
+      <canvas id="c"></canvas>
+      <div id="loading" class="loading">OPENING THE GULAG…</div>
+
+      <div id="title-screen" class="title-screen hidden">
+        <div id="title-keyart" class="title-keyart"></div>
+        <div class="title-veil"></div>
+        <div class="title-card">
+          <img id="title-logo" class="title-logo hidden" alt="" />
+          <p class="title-eyebrow">CLASSIFIED // PHYSICAL MEDIA FOREVER</p>
+          <h2>HENRI'S<br/>TORTURE GULAG</h2>
+          <p class="title-lede">
+            Spawn inmates. Grab limbs. Deploy unhinged implements.<br/>
+            Sever, roast, rocket, and rack up suffering.
+          </p>
+          <button type="button" id="btn-enter" class="btn-enter">ENTER THE GULAG</button>
+          <p class="title-keys">Right-drag grab · Left-click tools · Space inmate · C batch · Tab cycle tools</p>
+        </div>
+      </div>
+
+      <div id="combo" class="combo hidden"><b>x2</b><span>COMBO</span></div>
+      <div id="hint" class="hint">
+        <b>Right-drag</b> grab · <b>Left-click</b> tool · <b>Space</b> inmate · edge-pan camera
+      </div>
+      <div id="toast" class="toast hidden"></div>
+    </div>
+
+    <footer id="toolbar">
+      <div id="tool-row" class="tool-row"></div>
+      <div class="tool-meta">
+        <div id="tool-name">HAND</div>
+        <div id="tool-desc">Grab parts. Fling hard for impact damage.</div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

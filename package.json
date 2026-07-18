@@ -1,0 +1,9 @@
+{
+  "name": "henris-torture-gulag",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Henri's Torture Gulag — physics human sandbox. Grab, maim, explode, experiment.",
+  "scripts": {
+    "start": "python3 -m http.server 8780"
+  }
+}
