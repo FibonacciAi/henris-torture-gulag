@@ -215,8 +215,9 @@ function buildToolbar() {
 // ─── Spawn ───
 function spawnPerson(x, y, quiet = false) {
   sfx.unlock();
+  // Spawn standing just above the floor — no long freefall deploy
   const px = x ?? 280 + Math.random() * (WORLD_W - 560);
-  const py = y ?? 100 + Math.random() * 100;
+  const py = y ?? (ctx.floorY - 95 - Math.random() * 20);
   const p = createRagdoll(world, px, py, stats, null);
   people.push(p);
   syncStats();
@@ -230,7 +231,7 @@ function spawnPerson(x, y, quiet = false) {
 
 function spawnCrowd(n = 6) {
   for (let i = 0; i < n; i++) {
-    spawnPerson(350 + i * 100 + Math.random() * 50, 90 + Math.random() * 70, true);
+    spawnPerson(350 + i * 110 + Math.random() * 40, ctx.floorY - 95 - Math.random() * 15, true);
   }
   sfx.spawn();
   toast(`INMATES ×${n}`);

@@ -121,8 +121,6 @@ export function createRagdoll(world, x, y, stats, palette) {
     severed: new Set(),
     onFire: 0,
     bleeds: [],
-    // Don't take fall/impact damage while settling after spawn
-    spawnGrace: 2.8,
   };
 
   for (const b of Object.values(parts)) {
@@ -131,11 +129,10 @@ export function createRagdoll(world, x, y, stats, palette) {
   }
   for (const j of joints) Composite.add(world, j);
 
-  // Gentle settle — no slam into the floor on deploy
-  Body.setVelocity(torso, { x: (Math.random() - 0.5) * 0.8, y: 0.2 });
-  Body.setAngularVelocity(torso, (Math.random() - 0.5) * 0.02);
+  // Park them still — no deploy slam
   for (const b of Object.values(parts)) {
-    Body.setVelocity(b, { x: torso.velocity.x, y: Math.min(2, Math.max(0, b.velocity.y)) });
+    Body.setVelocity(b, { x: 0, y: 0 });
+    Body.setAngularVelocity(b, 0);
   }
 
   stats.people += 1;
@@ -275,42 +272,49 @@ export function killPerson(person, ctx, point) {
   ctx.toast?.('INMATE TERMINATED');
 }
 
+/**
+ * Collision damage is ONLY for real hazards / violence — never for:
+ * - landing on floor / walls / tables after spawn or fall
+ * - limbs clacking against each other (same inmate)
+ * Soft drops must never chip HP or kill.
+ */
 export function applyImpactDamage(pair, ctx) {
   const a = pair.bodyA;
   const b = pair.bodyB;
   const speed = Vector.magnitude(Vector.sub(a.velocity, b.velocity));
-  // Ignore soft landings / jostling — only real violence
-  if (speed < 14) return;
+  if (speed < 10) return;
 
   for (const body of [a, b]) {
     const person = body.plugin?.person;
     const part = body.plugin?.part;
     if (!person || !part) continue;
-    if ((person.spawnGrace || 0) > 0) continue;
 
     const other = body === a ? b : a;
-    const isFloorish = other.isStatic && (other.label === 'wall' || other.label === 'prop');
-    const isAnvil = !!other.plugin?.anvil;
-    const isSpike = !!other.plugin?.spike;
 
-    // Normal floor/table landings never hurt — only extreme splats (yeeted into ground)
-    if (isFloorish && !isAnvil && !isSpike) {
-      if (speed < 28) continue;
+    // Own limbs thrashing on land — never self-damage
+    if (other.plugin?.person && other.plugin.person.id === person.id) continue;
+
+    // Floor, walls, ceilings, crates, tables — never hurt on contact.
+    // (Yeet damage is applied on grab-release; tools/projectiles handle the rest.)
+    if (other.isStatic && !other.plugin?.anvil && !other.plugin?.spike && !other.plugin?.mine) {
+      continue;
     }
 
-    let mul = 0.75;
-    if (isAnvil) mul = 2.2;
-    else if (isSpike) mul = 1.8;
-    else if (isFloorish) mul = 1.1; // hard splat only
-    else if (other.isStatic) mul = 1.2;
-    else if (other.plugin?.person) mul = 0.55; // body-on-body soft
+    // Moving hazards only
+    let mul = 0;
+    if (other.plugin?.anvil) mul = 2.4;
+    else if (other.plugin?.spike) mul = 1.9;
+    else if (other.plugin?.bullet || other.plugin?.rocket || other.plugin?.grenade) mul = 1.5;
+    else if (other.plugin?.person) {
+      // inmate-on-inmate: only hard collisions
+      if (speed < 22) continue;
+      mul = 0.45;
+    } else {
+      continue;
+    }
 
-    // Threshold so light bumps after grace still don't chip HP
-    const base = isFloorish ? 22 : 12;
-    if (speed < base) continue;
-
-    const dmg = Math.min(62, (speed - base) * 2.0 * mul);
-    if (dmg < 5) continue;
+    const dmg = Math.min(55, (speed - 8) * 1.6 * mul);
+    if (dmg < 6) continue;
     const pt = pair.collision?.supports?.[0] || body.position;
     damagePart(person, part, dmg, pt, ctx);
     if (dmg > 14) {
@@ -322,9 +326,6 @@ export function applyImpactDamage(pair, ctx) {
 
 export function updatePeople(people, dt, ctx) {
   for (const person of people) {
-    if (person.spawnGrace > 0) {
-      person.spawnGrace = Math.max(0, person.spawnGrace - dt);
-    }
     // fire DoT
     if (person.onFire > 0) {
       person.onFire -= dt;
