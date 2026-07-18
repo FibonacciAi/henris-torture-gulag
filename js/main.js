@@ -446,31 +446,21 @@ function drawEnvironment(time) {
       c.drawImage(bg, ox - ctx.cam.x, ctx.floorY - bh - ctx.cam.y + 28, bw, bh);
       ox += bw - 1;
     }
-    // atmospheric wash
-    const pulse = 0.08 + Math.sin(time * 1.2) * 0.03;
-    c.fillStyle = `rgba(255,40,70,${pulse})`;
+    // dirty sodium wash — no neon
+    const pulse = 0.04 + Math.sin(time * 0.7) * 0.015;
+    c.fillStyle = `rgba(180,120,40,${pulse})`;
     c.fillRect(0 - ctx.cam.x, -100 - ctx.cam.y, WORLD_W, ctx.floorY + 100);
-    c.fillStyle = 'rgba(6,10,20,0.28)';
+    c.fillStyle = 'rgba(12,10,8,0.32)';
     c.fillRect(0 - ctx.cam.x, -100 - ctx.cam.y, WORLD_W, ctx.floorY + 100);
   } else {
-    c.fillStyle = '#10141c';
+    c.fillStyle = '#1a1612';
     c.fillRect(0 - ctx.cam.x, 0 - ctx.cam.y, WORLD_W, WORLD_H);
   }
 
-  c.fillStyle = 'rgba(8,10,16,0.5)';
+  c.fillStyle = 'rgba(10,8,6,0.45)';
   c.fillRect(0 - ctx.cam.x, ctx.floorY - ctx.cam.y, WORLD_W, 420);
 
-  // floor grid
-  c.strokeStyle = 'rgba(84,211,222,0.05)';
-  c.lineWidth = 1;
-  for (let x = 0; x < WORLD_W; x += 48) {
-    c.beginPath();
-    c.moveTo(x - ctx.cam.x, ctx.floorY - ctx.cam.y);
-    c.lineTo(x - ctx.cam.x, ctx.floorY + 80 - ctx.cam.y);
-    c.stroke();
-  }
-
-  // props with metal look
+  // props — rusted iron
   for (const b of world.bodies) {
     if (!b.isStatic || b.label === 'wall') continue;
     if (b.plugin?.mine || b.plugin?.spike) continue;
@@ -483,27 +473,20 @@ function drawEnvironment(time) {
     c.translate(x, y);
     c.rotate(b.angle);
     const g = c.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
-    g.addColorStop(0, '#3a4458');
-    g.addColorStop(0.5, '#2a3140');
-    g.addColorStop(1, '#1a2030');
+    g.addColorStop(0, '#5a4a3a');
+    g.addColorStop(0.5, '#3a3028');
+    g.addColorStop(1, '#2a2018');
     c.fillStyle = g;
-    c.strokeStyle = 'rgba(84,211,222,0.25)';
+    c.strokeStyle = 'rgba(160,120,60,0.25)';
     c.lineWidth = 1.5;
     c.fillRect(-w / 2, -h / 2, w, h);
     c.strokeRect(-w / 2, -h / 2, w, h);
     c.restore();
   }
 
-  // neon floor line
-  c.strokeStyle = 'rgba(255,61,90,0.75)';
-  c.lineWidth = 2.5;
-  c.beginPath();
-  c.moveTo(0 - ctx.cam.x, ctx.floorY - ctx.cam.y);
-  c.lineTo(WORLD_W - ctx.cam.x, ctx.floorY - ctx.cam.y);
-  c.stroke();
-  // soft glow without shadowBlur (stable under zoom)
-  c.strokeStyle = 'rgba(255,61,90,0.2)';
-  c.lineWidth = 6;
+  // grimy floor seam
+  c.strokeStyle = 'rgba(90,40,30,0.55)';
+  c.lineWidth = 2;
   c.beginPath();
   c.moveTo(0 - ctx.cam.x, ctx.floorY - ctx.cam.y);
   c.lineTo(WORLD_W - ctx.cam.x, ctx.floorY - ctx.cam.y);
@@ -526,7 +509,7 @@ function drawCrosshair() {
   const tool = TOOLS[toolIndex];
   c.save();
   c.translate(mx, my);
-  c.strokeStyle = 'rgba(255,61,90,0.85)';
+  c.strokeStyle = 'rgba(201,162,39,0.9)';
   c.lineWidth = 1.5;
   const r = tool.id === 'hand' ? 14 : 18;
   c.beginPath();
@@ -538,10 +521,9 @@ function drawCrosshair() {
   c.moveTo(0, -r - 4); c.lineTo(0, -4);
   c.moveTo(0, 4); c.lineTo(0, r + 4);
   c.stroke();
-  // aim line for guns
   if (tool.id !== 'hand' && tool.id !== 'mine' && tool.id !== 'spikes' && tool.id !== 'anvil') {
     const ang = ctx.aimAngle || 0;
-    c.strokeStyle = 'rgba(255,61,90,0.25)';
+    c.strokeStyle = 'rgba(201,162,39,0.28)';
     c.setLineDash([4, 6]);
     c.beginPath();
     c.moveTo(0, 0);
@@ -626,8 +608,8 @@ function frame(now) {
   c.clearRect(0, 0, ctx.W, ctx.H);
 
   const grd = c.createLinearGradient(0, 0, 0, ctx.H);
-  grd.addColorStop(0, '#0a0c14');
-  grd.addColorStop(1, '#06070c');
+  grd.addColorStop(0, '#16120e');
+  grd.addColorStop(1, '#0c0a08');
   c.fillStyle = grd;
   c.fillRect(0, 0, ctx.W, ctx.H);
 
@@ -651,13 +633,13 @@ function frame(now) {
     const bx = grabBody.position.x - ctx.cam.x;
     const by = grabBody.position.y - ctx.cam.y;
     c.save();
-    c.strokeStyle = 'rgba(84,211,222,0.85)';
+    c.strokeStyle = 'rgba(201,162,39,0.85)';
     c.lineWidth = 2.5;
     c.beginPath();
     c.moveTo(ax, ay);
     c.lineTo(bx, by);
     c.stroke();
-    c.fillStyle = '#54d3de';
+    c.fillStyle = '#c9a227';
     c.beginPath();
     c.arc(ax, ay, 6, 0, Math.PI * 2);
     c.fill();
@@ -670,9 +652,9 @@ function frame(now) {
   drawVignette();
   if (playing) drawCrosshair();
 
-  // slow-mo tint
+  // slow-mo tint — dirty amber, not magenta neon
   if (timeScale < 0.85) {
-    c.fillStyle = `rgba(120,40,80,${(1 - timeScale) * 0.18})`;
+    c.fillStyle = `rgba(80,50,20,${(1 - timeScale) * 0.16})`;
     c.fillRect(0, 0, ctx.W, ctx.H);
   }
 

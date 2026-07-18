@@ -237,7 +237,7 @@ export function createFx() {
       ctx.globalAlpha = Math.max(0, t);
       ctx.translate(f.x - cam.x, f.y - cam.y);
       ctx.scale(sc, sc);
-      ctx.font = '800 14px Orbitron, sans-serif';
+      ctx.font = '800 13px "IBM Plex Sans", sans-serif';
       ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(0,0,0,0.65)';
       ctx.strokeText(f.text, 0, 0);

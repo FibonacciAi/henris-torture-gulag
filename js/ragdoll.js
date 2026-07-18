@@ -46,10 +46,10 @@ export function createRagdoll(world, x, y, stats, palette) {
   const group = Body.nextGroup(true);
   const scale = 0.95 + Math.random() * 0.15;
   const shirt = palette?.shirt || pick([
-    '#3d6bff', '#ff3d5a', '#3dff9a', '#ffb020', '#c44dff', '#54d3de',
+    '#6a6a6a', '#5c5854', '#4a5248', '#7a7268', '#555a50', '#6e6560',
   ]);
-  const pants = palette?.pants || pick(['#2a3348', '#1e2433', '#3a2a1a', '#222']);
-  const skin = palette?.skin || pick(['#e8b896', '#c48a64', '#f0c8a8', '#8d5524', '#ffd1b0']);
+  const pants = palette?.pants || pick(['#3a3a3a', '#2e2e2e', '#444038', '#353530']);
+  const skin = palette?.skin || pick(['#c9a88a', '#b8956e', '#d4b090', '#a67c52', '#c4a07a']);
 
   // Larger hitboxes to match upscaled sprites
   const head = Bodies.circle(x, y - 58 * scale, 14 * scale, partOpts('head', id, group));
@@ -420,10 +420,10 @@ function drawPart(ctx, person, name, body, cam) {
   if (sprite) {
     ctx.drawImage(sprite, -sw / 2, -sh / 2, sw, sh);
 
-    // soft palette wash for subject variety
+    // light institutional wash only — keep prison stripe art readable
     if ((name === 'torso' || name.startsWith('upperArm')) && person.shirt) {
       ctx.globalCompositeOperation = 'multiply';
-      ctx.globalAlpha = 0.4;
+      ctx.globalAlpha = 0.22;
       ctx.fillStyle = person.shirt;
       ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
       ctx.globalCompositeOperation = 'source-over';
