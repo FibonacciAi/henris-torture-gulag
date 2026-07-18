@@ -130,7 +130,10 @@ function buildBounds() {
 buildBounds();
 
 Events.on(engine, 'collisionStart', (e) => {
-  for (const pair of e.pairs) applyImpactDamage(pair, ctx);
+  const pairs = e.pairs;
+  const limit = people.length > 18 ? 12 : people.length > 12 ? 24 : pairs.length;
+  const n = Math.min(pairs.length, limit);
+  for (let i = 0; i < n; i++) applyImpactDamage(pairs[i], ctx);
 });
 
 // ─── Grab ───
