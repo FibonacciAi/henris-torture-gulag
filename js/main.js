@@ -6,7 +6,7 @@ import { createFx } from './fx.js';
 import { loadAll } from './assets.js';
 import {
   createRagdoll, damagePart, applyImpactDamage, updatePeople, drawPeople, bodyAt, killPerson,
-  setSprites,
+  setSprites, removePerson, ensureCapacity, MAX_INMATES,
 } from './ragdoll.js';
 import { TOOLS, createToolSystem, setToolSprites } from './tools.js';
 
@@ -94,10 +94,12 @@ function syncCombo() {
 // ─── World ───
 const engine = Engine.create({
   gravity: { x: 0, y: 1.15 },
-  positionIterations: 8,
-  velocityIterations: 6,
+  positionIterations: 6,
+  velocityIterations: 4,
+  enableSleeping: true,
 });
 const world = engine.world;
+engine.enableSleeping = true;
 ctx.engine = engine;
 ctx.world = world;
 ctx.fx = createFx();
@@ -214,47 +216,105 @@ function buildToolbar() {
 }
 
 // ─── Spawn ───
+let lastBatchAt = 0;
+
 function spawnPerson(x, y, quiet = false) {
   sfx.unlock();
+  ensureCapacity(world, people, stats, 1);
+  if (people.length >= MAX_INMATES) {
+    if (!quiet) toast(`CAPACITY ${MAX_INMATES} — PURGE OR WAIT`);
+    return null;
+  }
   // Spawn standing just above the floor — no long freefall deploy
   const px = x ?? 280 + Math.random() * (WORLD_W - 560);
   const py = y ?? (ctx.floorY - 95 - Math.random() * 20);
   const p = createRagdoll(world, px, py, stats, null);
   people.push(p);
+  ctx.fx.setLoad?.(people.length);
+  tunePhysics();
   syncStats();
   if (!quiet) {
     sfx.spawn();
     toast('INMATE DEPLOYED');
-    ctx.fx.flash(px, py, 40, 'rgba(84,211,222,0.35)', 0.15);
+    ctx.fx.flash(px, py, 40, 'rgba(180,120,40,0.3)', 0.12);
   }
   return p;
 }
 
-function spawnCrowd(n = 6) {
-  for (let i = 0; i < n; i++) {
-    spawnPerson(350 + i * 110 + Math.random() * 40, ctx.floorY - 95 - Math.random() * 15, true);
+function spawnCrowd(n = 8) {
+  const now = performance.now();
+  // Debounce spam-clicking BATCH
+  if (now - lastBatchAt < 280) {
+    toast('COOLING…');
+    return;
+  }
+  lastBatchAt = now;
+
+  const free = MAX_INMATES - people.length;
+  if (free <= 0) {
+    // Recycle oldest dead / oldest living to make room for one batch
+    ensureCapacity(world, people, stats, Math.min(n, 8));
+  }
+  const room = Math.max(0, MAX_INMATES - people.length);
+  const count = Math.min(n, room, 8);
+  if (count <= 0) {
+    toast(`FULL (${MAX_INMATES})`);
+    return;
+  }
+  const baseX = 300 + Math.random() * 400;
+  for (let i = 0; i < count; i++) {
+    spawnPerson(baseX + i * 90 + Math.random() * 30, ctx.floorY - 95 - Math.random() * 12, true);
   }
   sfx.spawn();
-  toast(`INMATES ×${n}`);
+  toast(count < n ? `BATCH ${count}/${MAX_INMATES}` : `INMATES ×${count}`);
+  ctx.fx.setLoad?.(people.length);
+  tunePhysics();
+}
+
+function tunePhysics() {
+  const n = people.length;
+  // Fewer solver iterations when crowded — biggest CPU win after body count
+  if (n > 20) {
+    engine.positionIterations = 3;
+    engine.velocityIterations = 2;
+  } else if (n > 12) {
+    engine.positionIterations = 4;
+    engine.velocityIterations = 3;
+  } else {
+    engine.positionIterations = 6;
+    engine.velocityIterations = 4;
+  }
+}
+
+/** Cull long-dead bodies when crowded so BATCH spam stays playable. */
+function cullStaleCorpses() {
+  if (people.length < MAX_INMATES * 0.7) return;
+  const now = performance.now();
+  for (let i = people.length - 1; i >= 0; i--) {
+    const p = people[i];
+    if (!p.alive && p.deadAt && now - p.deadAt > 25000) {
+      removePerson(world, p, people, stats);
+    }
+  }
+  ctx.fx.setLoad?.(people.length);
+  tunePhysics();
 }
 
 function clearLab() {
   ctx.grab.end();
   ctx.tools.clear();
   ctx.fx.clearDecals?.();
-  for (const person of people) {
-    for (const b of Object.values(person.parts)) {
-      try { Composite.remove(world, b); } catch {}
-    }
-    for (const j of person.joints) {
-      try { Composite.remove(world, j); } catch {}
-    }
+  // Copy array — removePerson mutates people
+  for (const person of [...people]) {
+    removePerson(world, person, people, stats);
   }
   people.length = 0;
   stats.people = 0;
   combo = 0;
   comboTimer = 0;
   syncCombo();
+  tunePhysics();
+  ctx.fx.setLoad?.(0);
   syncStats();
   toast('GULAG PURGED');
 }
@@ -594,11 +654,13 @@ function drawCrosshair() {
 // ─── Loop ───
 let last = performance.now();
 let time = 0;
+let frameCount = 0;
 
 function frame(now) {
   let dt = Math.min(0.033, (now - last) / 1000);
   last = now;
   time += dt;
+  frameCount++;
 
   // slow-mo recovery
   if (slowMoT > 0) {
@@ -641,6 +703,9 @@ function frame(now) {
     ctx.tools.update(simDt);
     updatePeople(people, simDt, ctx);
     ctx.fx.update(simDt, ctx.floorY);
+
+    // Periodic corpse cull under pressure
+    if ((frameCount & 63) === 0) cullStaleCorpses();
   }
 
   if (ctx.shake > 0) ctx.shake = Math.max(0, ctx.shake - dt * 3.2);
@@ -668,11 +733,13 @@ function frame(now) {
   c.translate(sx, sy);
   c.scale(z, z);
 
+  const viewW = ctx.W / z;
+  const viewH = ctx.H / z;
   drawEnvironment(time);
-  ctx.fx.drawDecals(c, ctx.cam);
-  drawPeople(c, people, ctx.cam);
+  ctx.fx.drawDecals(c, ctx.cam, viewW, viewH);
+  drawPeople(c, people, ctx.cam, { w: viewW, h: viewH });
   ctx.tools.draw(c, ctx.cam);
-  ctx.fx.draw(c, ctx.cam);
+  ctx.fx.draw(c, ctx.cam, viewW, viewH);
 
   // grab rope
   if (grabConstraint && grabBody) {

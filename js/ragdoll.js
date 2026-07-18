@@ -34,11 +34,41 @@ function partOpts(label, personId, group) {
     label,
     personId,
     collisionFilter: { group },
-    friction: 0.35,
-    frictionAir: 0.02,
-    restitution: 0.15,
+    friction: 0.4,
+    frictionAir: 0.03,
+    restitution: 0.08,
     density: label === 'head' ? 0.0014 : label === 'torso' ? 0.0022 : 0.0016,
+    sleepThreshold: 45,
   };
+}
+
+/** Hard cap — each inmate is ~10 bodies + joints. Beyond this FPS dies. */
+export const MAX_INMATES = 28;
+
+export function removePerson(world, person, people, stats) {
+  if (!person || person._removed) return;
+  person._removed = true;
+  for (const b of Object.values(person.parts || {})) {
+    try { Composite.remove(world, b); } catch {}
+  }
+  for (const j of person.joints || []) {
+    try { Composite.remove(world, j); } catch {}
+  }
+  for (const j of person.stabilizers || []) {
+    try { Composite.remove(world, j); } catch {}
+  }
+  const idx = people.indexOf(person);
+  if (idx >= 0) people.splice(idx, 1);
+  if (stats) stats.people = Math.max(0, (stats.people || 1) - 1);
+}
+
+/** Free slots by removing oldest dead, then oldest living. */
+export function ensureCapacity(world, people, stats, need = 1) {
+  while (people.length + need > MAX_INMATES && people.length > 0) {
+    let victim = people.find((p) => !p.alive);
+    if (!victim) victim = people[0];
+    removePerson(world, victim, people, stats);
+  }
 }
 
 export function createRagdoll(world, x, y, stats, palette) {
@@ -114,6 +144,7 @@ export function createRagdoll(world, x, y, stats, palette) {
     maxHp: { ...PART_HP },
     alive: true,
     deadAt: 0,
+    bornAt: performance.now(),
     skin,
     shirt,
     pants,
@@ -121,6 +152,7 @@ export function createRagdoll(world, x, y, stats, palette) {
     severed: new Set(),
     onFire: 0,
     bleeds: [],
+    _removed: false,
   };
 
   for (const b of Object.values(parts)) {
@@ -154,14 +186,15 @@ export function damagePart(person, partName, amount, point, ctx) {
 
   if (point && dealt > 0) {
     const mul = ctx.comboMul?.() || 1;
-    ctx.fx.blood(point.x, point.y, Math.min(28, 6 + dealt * 0.4), 130 + amount * 4);
-    if (amount > 16) ctx.fx.sparks(point.x, point.y, 5);
-    if (amount > 28) ctx.fx.gib(point.x, point.y, 3);
+    const load = ctx.people?.length || 0;
+    const fxScale = load > 18 ? 0.35 : load > 12 ? 0.6 : 1;
+    ctx.fx.blood(point.x, point.y, Math.min(28, 6 + dealt * 0.4) * fxScale, 130 + amount * 4);
+    if (amount > 16 && fxScale > 0.4) ctx.fx.sparks(point.x, point.y, Math.ceil(5 * fxScale));
+    if (amount > 28 && fxScale > 0.5) ctx.fx.gib(point.x, point.y, Math.ceil(3 * fxScale));
     ctx.stats.chaos += Math.round(dealt * mul);
     ctx.registerHit?.(dealt, point);
-    // pain flinch
     const body = person.parts[partName];
-    if (body && amount > 8) {
+    if (body && amount > 8 && load < 20) {
       Body.applyForce(body, body.position, {
         x: (Math.random() - 0.5) * 0.006 * amount,
         y: -0.002 * amount,
@@ -246,6 +279,13 @@ export function killPerson(person, ctx, point) {
   person.alive = false;
   person.deadAt = performance.now();
   person.hp.head = Math.min(person.hp.head, 0);
+  // Sleep corpses faster — less solver work
+  for (const b of Object.values(person.parts)) {
+    if (b) {
+      b.frictionAir = 0.06;
+      b.slop = 0.08;
+    }
+  }
   // loosen joints — ragdoll becomes fully limp
   for (const j of person.joints) {
     j.stiffness = Math.min(j.stiffness, 0.15);
@@ -325,57 +365,83 @@ export function applyImpactDamage(pair, ctx) {
 }
 
 export function updatePeople(people, dt, ctx) {
+  const n = people.length;
+  const heavy = n > 14;
+  const bleedChance = heavy ? 0.18 : 0.5;
+  const fireChance = heavy ? 0.12 : 0.35;
+
   for (const person of people) {
+    if (person._removed) continue;
+
     // fire DoT
     if (person.onFire > 0) {
       person.onFire -= dt;
       const torso = person.parts.torso;
-      if (torso && Math.random() < 0.35) {
-        ctx.fx.fire(torso.position.x + (Math.random() - 0.5) * 16, torso.position.y + (Math.random() - 0.5) * 20, 4);
+      if (torso && Math.random() < fireChance) {
+        if (!heavy || Math.random() < 0.5) {
+          ctx.fx.fire(torso.position.x + (Math.random() - 0.5) * 16, torso.position.y + (Math.random() - 0.5) * 20, heavy ? 2 : 4);
+        }
         damagePart(person, pick(Object.keys(person.parts)), 3 + Math.random() * 4, torso.position, ctx);
       }
     }
 
-    // bleeding
-    for (let i = person.bleeds.length - 1; i >= 0; i--) {
-      const bl = person.bleeds[i];
-      bl.t -= dt;
-      if (bl.t <= 0 || person.severed.has(bl.part) && person.hp[bl.part] <= 0 && Math.random() < 0.02) {
-        // keep severed stumps dripping longer
-      }
-      if (bl.t <= 0) { person.bleeds.splice(i, 1); continue; }
-      const body = person.parts[bl.part];
-      if (!body) continue;
-      if (Math.random() < 0.5) {
-        ctx.fx.blood(body.position.x, body.position.y, 2, 40);
-        if (person.alive && Math.random() < 0.15) {
-          damagePart(person, bl.part, 0.8, body.position, ctx);
+    // bleeding — throttle hard under load
+    if (person.bleeds.length && (!heavy || Math.random() < 0.4)) {
+      for (let i = person.bleeds.length - 1; i >= 0; i--) {
+        const bl = person.bleeds[i];
+        bl.t -= dt;
+        if (bl.t <= 0) { person.bleeds.splice(i, 1); continue; }
+        const body = person.parts[bl.part];
+        if (!body) continue;
+        if (Math.random() < bleedChance) {
+          if (!heavy) ctx.fx.blood(body.position.x, body.position.y, 2, 40);
+          else if (Math.random() < 0.25) ctx.fx.decal?.(body.position.x, ctx.floorY - 2, 6);
+          if (person.alive && Math.random() < 0.12) {
+            damagePart(person, bl.part, 0.8, body.position, ctx);
+          }
         }
       }
     }
+
+    // Cap bleed list
+    if (person.bleeds.length > 4) person.bleeds.length = 4;
   }
 }
 
-export function drawPeople(ctx2d, people, cam) {
+function inView(body, cam, viewW, viewH, margin = 80) {
+  const x = body.position.x - cam.x;
+  const y = body.position.y - cam.y;
+  return x > -margin && x < viewW + margin && y > -margin && y < viewH + margin;
+}
+
+export function drawPeople(ctx2d, people, cam, view) {
   const order = [
     'lowerLegL', 'lowerLegR', 'upperLegL', 'upperLegR',
     'lowerArmL', 'lowerArmR', 'upperArmL', 'upperArmR',
     'torso', 'head',
   ];
+  const n = people.length;
+  const viewW = view?.w ?? 1200;
+  const viewH = view?.h ?? 800;
+  const drawShadows = n <= 12;
+  const simple = n > 18;
 
-  // ground shadows first
   for (const person of people) {
-    for (const name of order) {
-      const body = person.parts[name];
-      if (!body) continue;
-      drawShadow(ctx2d, person, name, body, cam);
+    if (person._removed) continue;
+    const torso = person.parts.torso || person.parts.head;
+    if (torso && !inView(torso, cam, viewW, viewH, 120)) continue;
+
+    if (drawShadows && !simple) {
+      // one shadow under torso only
+      const t = person.parts.torso;
+      if (t) drawShadow(ctx2d, person, 'torso', t, cam);
     }
-  }
-  for (const person of people) {
+
     for (const name of order) {
       const body = person.parts[name];
       if (!body) continue;
-      drawPart(ctx2d, person, name, body, cam);
+      if (!inView(body, cam, viewW, viewH, 60)) continue;
+      drawPart(ctx2d, person, name, body, cam, simple);
     }
   }
 }
@@ -386,16 +452,15 @@ function drawShadow(ctx, person, name, body, cam) {
   const sh = ph * person.scale * 1.2;
   const x = body.position.x - cam.x;
   const y = body.position.y - cam.y + sh * 0.42;
-  ctx.save();
-  ctx.globalAlpha = person.alive ? 0.22 : 0.14;
+  ctx.globalAlpha = person.alive ? 0.18 : 0.1;
   ctx.fillStyle = '#000';
   ctx.beginPath();
   ctx.ellipse(x, y, sw * 0.55, Math.max(4, sh * 0.12), 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.restore();
+  ctx.globalAlpha = 1;
 }
 
-function drawPart(ctx, person, name, body, cam) {
+function drawPart(ctx, person, name, body, cam, simple = false) {
   const x = body.position.x - cam.x;
   const y = body.position.y - cam.y;
   const ang = body.angle;
@@ -420,32 +485,31 @@ function drawPart(ctx, person, name, body, cam) {
   if (sprite) {
     ctx.drawImage(sprite, -sw / 2, -sh / 2, sw, sh);
 
-    // light institutional wash only — keep prison stripe art readable
-    if ((name === 'torso' || name.startsWith('upperArm')) && person.shirt) {
-      ctx.globalCompositeOperation = 'multiply';
-      ctx.globalAlpha = 0.22;
-      ctx.fillStyle = person.shirt;
-      ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
-      ctx.globalCompositeOperation = 'source-over';
-      ctx.globalAlpha = 1;
-    }
-
-    // damage blood overlay
-    if (hpPct < 0.65) {
-      ctx.globalAlpha = (1 - hpPct) * 0.55;
-      ctx.fillStyle = '#8a1020';
-      ctx.beginPath();
-      ctx.ellipse(sw * 0.1, 0, sw * 0.22, sh * 0.18, 0.2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
-    if (severed) {
-      ctx.strokeStyle = '#f0e6d0';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(-sw / 2, -sh / 2 + 2);
-      ctx.lineTo(sw / 2, -sh / 2 + 2);
-      ctx.stroke();
+    if (!simple) {
+      if ((name === 'torso' || name.startsWith('upperArm')) && person.shirt) {
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.globalAlpha = 0.22;
+        ctx.fillStyle = person.shirt;
+        ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
+      }
+      if (hpPct < 0.65) {
+        ctx.globalAlpha = (1 - hpPct) * 0.55;
+        ctx.fillStyle = '#8a1020';
+        ctx.beginPath();
+        ctx.ellipse(sw * 0.1, 0, sw * 0.22, sh * 0.18, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+      if (severed) {
+        ctx.strokeStyle = '#f0e6d0';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-sw / 2, -sh / 2 + 2);
+        ctx.lineTo(sw / 2, -sh / 2 + 2);
+        ctx.stroke();
+      }
     }
   } else {
     // procedural fallback
@@ -466,8 +530,7 @@ function drawPart(ctx, person, name, body, cam) {
     }
   }
 
-  // fire glow
-  if (person.onFire > 0 && (name === 'torso' || name === 'head')) {
+  if (!simple && person.onFire > 0 && (name === 'torso' || name === 'head')) {
     ctx.globalAlpha = 0.35 + Math.random() * 0.25;
     ctx.fillStyle = '#ff6b3d';
     ctx.beginPath();
