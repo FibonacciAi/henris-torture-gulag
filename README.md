@@ -19,15 +19,17 @@ Open **http://localhost:8780**
 
 | Input | Action |
 |-------|--------|
+| **Middle-drag** (or Alt+left-drag) | Pan camera |
+| **Scroll** | Zoom toward cursor |
+| **Arrow keys** | Pan |
 | **Left click** | Use current tool |
-| **Right click / hold** | Grab & fling a body part |
-| **1–9 / 0 / - / =** | Select tool |
-| **Scroll** | Zoom |
+| **Right-drag** | Grab & fling a body part |
+| **1–9 / 0** | Select tool |
 | **Space** | Spawn a person |
 | **C** | Spawn a crowd |
 | **Shift+R** | Clear the gulag |
 | **P** | Pause physics |
-| **Esc** | Cancel grab / deselect |
+| **Esc** | Cancel grab |
 
 ## Tools
 

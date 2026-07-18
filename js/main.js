@@ -271,9 +271,14 @@ function syncStats() {
 // ─── Input ───
 const keys = {};
 let leftDown = false;
-let zoom = 1; // mirrored on ctx.zoom
 let playing = false;
 ctx.zoom = 1;
+
+// Camera: middle-drag (or Alt+left) pans; scroll zooms to cursor. No auto-follow.
+let panning = false;
+let panLast = null; // {x,y} screen
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2.0;
 
 function resize() {
   const wrap = document.getElementById('stage-wrap');
@@ -285,6 +290,7 @@ function resize() {
   ctx2d.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
   ctx.W = rect.width;
   ctx.H = rect.height;
+  clampCam();
 }
 window.addEventListener('resize', resize);
 resize();
@@ -317,6 +323,43 @@ function updateAimFromPointer() {
   return w;
 }
 
+function clampCam() {
+  const z = ctx.zoom || 1;
+  const viewW = ctx.W / z;
+  const viewH = ctx.H / z;
+  // Allow a little overscroll, but keep most of the arena visible
+  const pad = 120;
+  ctx.cam.x = Math.max(-pad, Math.min(WORLD_W - viewW + pad, ctx.cam.x));
+  ctx.cam.y = Math.max(-pad, Math.min(WORLD_H - viewH + pad, ctx.cam.y));
+}
+
+/** Zoom so the world point under (sx,sy) screen stays fixed. */
+function zoomAt(sx, sy, nextZoom) {
+  const prev = ctx.zoom;
+  const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoom));
+  if (Math.abs(next - prev) < 1e-4) return;
+  const wx = sx / prev + ctx.cam.x;
+  const wy = sy / prev + ctx.cam.y;
+  ctx.zoom = next;
+  ctx.cam.x = wx - sx / next;
+  ctx.cam.y = wy - sy / next;
+  clampCam();
+  updateAimFromPointer();
+}
+
+/** Pan by screen-pixel delta (drag right → world moves right under cursor). */
+function panByScreen(dx, dy) {
+  const z = ctx.zoom || 1;
+  ctx.cam.x -= dx / z;
+  ctx.cam.y -= dy / z;
+  clampCam();
+}
+
+function wantsPan(e) {
+  // Middle mouse, or Alt+left, or Space+left
+  return e.button === 1 || (e.button === 0 && (e.altKey || keys.Space));
+}
+
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 canvas.addEventListener('pointerdown', (e) => {
@@ -326,9 +369,16 @@ canvas.addEventListener('pointerdown', (e) => {
   const p = canvasPos(e);
   ctx.pointer.x = p.x;
   ctx.pointer.y = p.y;
-  const w = worldFromPointer();
 
-  if (e.button === 2 || e.button === 1) {
+  if (wantsPan(e)) {
+    panning = true;
+    panLast = { x: p.x, y: p.y };
+    canvas.style.cursor = 'grabbing';
+    return;
+  }
+
+  const w = worldFromPointer();
+  if (e.button === 2) {
     ctx.pointer.right = true;
     ctx.grab.start(w.x, w.y);
   } else if (e.button === 0) {
@@ -345,16 +395,28 @@ canvas.addEventListener('pointermove', (e) => {
   ctx.pointer.dy = p.y - ctx.pointer.y;
   ctx.pointer.x = p.x;
   ctx.pointer.y = p.y;
+
+  if (panning && panLast) {
+    panByScreen(p.x - panLast.x, p.y - panLast.y);
+    panLast = { x: p.x, y: p.y };
+    return;
+  }
+
   const w = updateAimFromPointer();
   if (grabConstraint) ctx.grab.move(w.x, w.y);
 });
 
 canvas.addEventListener('pointerup', (e) => {
-  if (e.button === 2 || e.button === 1) {
+  if (panning && (e.button === 1 || e.button === 0)) {
+    panning = false;
+    panLast = null;
+    canvas.style.cursor = 'none';
+  }
+  if (e.button === 2) {
     ctx.pointer.right = false;
     ctx.grab.end();
   }
-  if (e.button === 0) {
+  if (e.button === 0 && !e.altKey) {
     leftDown = false;
     ctx.pointer.down = false;
     if (TOOLS[toolIndex].id === 'hand') ctx.grab.end();
@@ -364,24 +426,19 @@ canvas.addEventListener('pointerup', (e) => {
 canvas.addEventListener('pointerleave', () => {
   leftDown = false;
   ctx.pointer.down = false;
+  panning = false;
+  panLast = null;
   ctx.grab.end();
+  canvas.style.cursor = 'none';
 });
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (!playing) return;
-  const prev = ctx.zoom;
-  // Smooth, less twitchy zoom
-  const next = Math.min(1.6, Math.max(0.6, prev * (e.deltaY > 0 ? 0.92 : 1.08)));
-  if (next === prev) return;
-  // Keep world point under cursor fixed
-  const wx = ctx.pointer.x / prev + ctx.cam.x;
-  const wy = ctx.pointer.y / prev + ctx.cam.y;
-  ctx.zoom = next;
-  zoom = next;
-  ctx.cam.x = wx - ctx.pointer.x / next;
-  ctx.cam.y = wy - ctx.pointer.y / next;
-  updateAimFromPointer();
+  // Trackpad + mouse: exponential zoom proportional to delta (smooth, not stepped jumps)
+  const sensitivity = e.deltaMode === 1 ? 0.05 : 0.0012; // lines vs pixels
+  const factor = Math.exp(-e.deltaY * sensitivity);
+  zoomAt(ctx.pointer.x, ctx.pointer.y, ctx.zoom * factor);
 }, { passive: false });
 
 window.addEventListener('keydown', (e) => {
@@ -563,28 +620,19 @@ function frame(now) {
       }
     }
 
+    // Keyboard pan — arrows only (WASD conflicted with tool hotkeys)
+    // Constant screen-space speed so zoom doesn't make pan feel broken
+    const screenPan = 700 * dt;
     const z = ctx.zoom || 1;
-    // Arrow / WASD pan only (no auto edge-pan — it fights aiming)
-    const pan = 520 * dt / z;
-    if (keys.ArrowLeft || keys.KeyA) ctx.cam.x -= pan;
-    if (keys.ArrowRight || keys.KeyD) ctx.cam.x += pan;
-    if (keys.ArrowUp) ctx.cam.y -= pan;
-    if (keys.ArrowDown || keys.KeyS) ctx.cam.y += pan;
+    if (keys.ArrowLeft) ctx.cam.x -= screenPan / z;
+    if (keys.ArrowRight) ctx.cam.x += screenPan / z;
+    if (keys.ArrowUp) ctx.cam.y -= screenPan / z;
+    if (keys.ArrowDown) ctx.cam.y += screenPan / z;
+    // [ ] zoom toward view center (avoids tool hotkey clashes)
+    if (keys.BracketRight) zoomAt(ctx.W / 2, ctx.H / 2, ctx.zoom * Math.exp(dt * 1.1));
+    if (keys.BracketLeft) zoomAt(ctx.W / 2, ctx.H / 2, ctx.zoom * Math.exp(-dt * 1.1));
+    clampCam();
 
-    // Gentle follow while grabbing — don't hard-lock the camera
-    if (grabBody) {
-      const tx = grabBody.position.x - ctx.W / (2 * z);
-      const ty = grabBody.position.y - ctx.H / (2 * z);
-      ctx.cam.x += (tx - ctx.cam.x) * 0.03;
-      ctx.cam.y += (ty - ctx.cam.y) * 0.03;
-    }
-
-    const viewW = ctx.W / z;
-    const viewH = ctx.H / z;
-    ctx.cam.x = Math.max(-80, Math.min(WORLD_W - viewW + 80, ctx.cam.x));
-    ctx.cam.y = Math.max(-100, Math.min(WORLD_H - viewH + 60, ctx.cam.y));
-
-    // Single physics step — double-step made impacts/FX feel glitchy
     Engine.update(engine, (1000 / 60) * timeScale);
 
     if (leftDown && TOOLS[toolIndex].id !== 'hand') {
@@ -614,9 +662,9 @@ function frame(now) {
   c.fillRect(0, 0, ctx.W, ctx.H);
 
   const z = ctx.zoom || 1;
-  // Shake in screen space (after zoom) so zoomed-in camera doesn't amplify it
-  const sx = ctx.shake ? (Math.random() - 0.5) * ctx.shake * 8 : 0;
-  const sy = ctx.shake ? (Math.random() - 0.5) * ctx.shake * 8 : 0;
+  // Light shake only — heavy shake + zoom felt nauseating
+  const sx = ctx.shake ? (Math.random() - 0.5) * ctx.shake * 4 : 0;
+  const sy = ctx.shake ? (Math.random() - 0.5) * ctx.shake * 4 : 0;
   c.translate(sx, sy);
   c.scale(z, z);
 
