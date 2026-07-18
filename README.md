@@ -11,25 +11,36 @@ cd games/henris-torture-gulag
 python3 -m http.server 8780
 ```
 
-**Live:** [https://fibonacciai.github.io/henris-torture-gulag/](https://fibonacciai.github.io/henris-torture-gulag/)
+**Live (iPad-friendly):** [https://fibonacciai.github.io/henris-torture-gulag/](https://fibonacciai.github.io/henris-torture-gulag/)
 
-Open **http://localhost:8780**
+Repo: [github.com/FibonacciAi/henris-torture-gulag](https://github.com/FibonacciAi/henris-torture-gulag)
+
+Local: **http://localhost:8780**
 
 ## Controls
 
+### Desktop
 | Input | Action |
 |-------|--------|
-| **Middle-drag** (or Alt+left-drag) | Pan camera |
+| **Middle-drag** (or Alt+left-drag) | Pan |
 | **Scroll** | Zoom toward cursor |
 | **Arrow keys** | Pan |
-| **Left click** | Use current tool |
-| **Right-drag** | Grab & fling a body part |
+| **Left click** | Use tool |
+| **Right-drag** | Grab & fling |
 | **1–9 / 0** | Select tool |
-| **Space** | Spawn a person |
-| **C** | Spawn a crowd |
-| **Shift+R** | Clear the gulag |
-| **P** | Pause physics |
-| **Esc** | Cancel grab |
+| **Space** | Spawn |
+| **C** | Batch |
+| **Shift+R** | Purge |
+
+### Touch / iPad (multitouch)
+| Gesture | Action |
+|---------|--------|
+| **1 finger** | Use selected tool (or grab with Hand) |
+| **1 finger on empty (Hand)** | Pan |
+| **2 fingers drag** | Pan |
+| **Pinch** | Zoom |
+| **2 fingers on bodies** | Grab two limbs at once |
+| **Toolbar** | Pick tool (scrollable) |
 
 ## Tools
 

@@ -136,56 +136,72 @@ Events.on(engine, 'collisionStart', (e) => {
   for (let i = 0; i < n; i++) applyImpactDamage(pairs[i], ctx);
 });
 
-// ─── Grab ───
-let grabConstraint = null;
-let grabBody = null;
+// ─── Grab (multi-pointer: one grab per finger/mouse) ───
+const activeGrabs = new Map(); // pointerId -> { constraint, body }
+
+function endGrabId(id) {
+  const g = activeGrabs.get(id);
+  if (!g) return;
+  if (g.body && Vector.magnitude(g.body.velocity) > 10 && g.body.plugin?.person) {
+    const spd = Vector.magnitude(g.body.velocity);
+    damagePart(
+      g.body.plugin.person,
+      g.body.plugin.part,
+      Math.min(48, spd * 1.7),
+      g.body.position,
+      ctx
+    );
+    if (spd > 18) ctx.fx.floatText(g.body.position.x, g.body.position.y - 20, 'YEET', '#c9a227');
+  }
+  try { Composite.remove(world, g.constraint); } catch {}
+  activeGrabs.delete(id);
+}
+
+function endAllGrabs() {
+  for (const id of [...activeGrabs.keys()]) endGrabId(id);
+}
 
 ctx.grab = {
-  start(x, y) {
+  start(x, y, pointerId = 'mouse') {
+    if (activeGrabs.has(pointerId)) endGrabId(pointerId);
     const hit = bodyAt(people, x, y);
     let body = hit?.body;
     if (!body) {
       body = Matter.Query.point(world.bodies, { x, y }).find((b) => b.plugin?.person);
     }
-    if (!body) return;
-    grabBody = body;
-    grabConstraint = Constraint.create({
+    if (!body) return false;
+    // Don't double-grab same body with two fingers
+    for (const g of activeGrabs.values()) {
+      if (g.body === body) return false;
+    }
+    const constraint = Constraint.create({
       pointA: { x, y },
-      bodyB: grabBody,
-      pointB: { x: x - grabBody.position.x, y: y - grabBody.position.y },
+      bodyB: body,
+      pointB: { x: x - body.position.x, y: y - body.position.y },
       stiffness: 0.22,
       damping: 0.08,
       length: 0,
     });
-    Composite.add(world, grabConstraint);
+    Composite.add(world, constraint);
+    activeGrabs.set(pointerId, { constraint, body });
     sfx.grab();
+    return true;
   },
-  move(x, y) {
-    if (grabConstraint) {
-      // smooth follow for juicier flings
-      const a = grabConstraint.pointA;
-      a.x += (x - a.x) * 0.65;
-      a.y += (y - a.y) * 0.65;
-    }
+  move(x, y, pointerId = 'mouse') {
+    const g = activeGrabs.get(pointerId);
+    if (!g) return;
+    const a = g.constraint.pointA;
+    a.x += (x - a.x) * 0.7;
+    a.y += (y - a.y) * 0.7;
   },
-  end() {
-    if (!grabConstraint) return;
-    if (grabBody && Vector.magnitude(grabBody.velocity) > 10 && grabBody.plugin?.person) {
-      const spd = Vector.magnitude(grabBody.velocity);
-      damagePart(
-        grabBody.plugin.person,
-        grabBody.plugin.part,
-        Math.min(48, spd * 1.7),
-        grabBody.position,
-        ctx
-      );
-      if (spd > 18) ctx.fx.floatText(grabBody.position.x, grabBody.position.y - 20, 'YEET', '#54d3de');
-    }
-    Composite.remove(world, grabConstraint);
-    grabConstraint = null;
-    grabBody = null;
+  end(pointerId = 'mouse') {
+    endGrabId(pointerId);
   },
-  active: () => !!grabConstraint,
+  endAll: endAllGrabs,
+  active: () => activeGrabs.size > 0,
+  forEach(fn) {
+    for (const [id, g] of activeGrabs) fn(id, g);
+  },
 };
 
 // ─── Tools UI ───
@@ -213,7 +229,15 @@ function buildToolbar() {
       <img class="tool-img" src="assets/tools/${t.id}.png" alt="${t.name}" draggable="false" />
       <span class="key">${t.key}</span>`;
     btn.title = `${t.name} (${t.key})`;
-    btn.onclick = () => setTool(i);
+    // touch-friendly: prevent double-fire / scroll steal
+    btn.addEventListener('pointerdown', (e) => {
+      e.stopPropagation();
+    });
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      setTool(i);
+      sfx.unlock();
+    });
     row.appendChild(btn);
   });
 }
@@ -304,7 +328,7 @@ function cullStaleCorpses() {
 }
 
 function clearLab() {
-  ctx.grab.end();
+  ctx.grab.endAll();
   ctx.tools.clear();
   ctx.fx.clearDecals?.();
   // Copy array — removePerson mutates people
@@ -331,31 +355,39 @@ function syncStats() {
   if (best) best.textContent = String(stats.bestCombo);
 }
 
-// ─── Input ───
+// ─── Input (mouse + multitouch) ───
 const keys = {};
 let leftDown = false;
 let playing = false;
 ctx.zoom = 1;
+const isTouchPrimary = window.matchMedia('(hover: none) and (pointer: coarse)').matches
+  || ('ontouchstart' in window);
 
-// Camera: middle-drag (or Alt+left) pans; scroll zooms to cursor. No auto-follow.
-let panning = false;
-let panLast = null; // {x,y} screen
-const ZOOM_MIN = 0.5;
-const ZOOM_MAX = 2.0;
+const ZOOM_MIN = 0.45;
+const ZOOM_MAX = 2.2;
+
+/** Active pointers: id -> { x, y, sx, sy, type, role } */
+const pointers = new Map();
+let pinchState = null; // { dist, midX, midY, zoom }
+let toolPointerId = null; // finger/mouse firing continuous tools
+let panPointerId = null; // single-finger middle / alt pan
 
 function resize() {
   const wrap = document.getElementById('stage-wrap');
   const rect = wrap.getBoundingClientRect();
-  canvas.width = Math.floor(rect.width * devicePixelRatio);
-  canvas.height = Math.floor(rect.height * devicePixelRatio);
+  const dpr = Math.min(window.devicePixelRatio || 1, 2); // cap DPR on iPad for perf
+  canvas.width = Math.floor(rect.width * dpr);
+  canvas.height = Math.floor(rect.height * dpr);
   canvas.style.width = `${rect.width}px`;
   canvas.style.height = `${rect.height}px`;
-  ctx2d.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.W = rect.width;
   ctx.H = rect.height;
+  document.documentElement.classList.toggle('touch-ui', isTouchPrimary);
   clampCam();
 }
 window.addEventListener('resize', resize);
+window.addEventListener('orientationchange', () => setTimeout(resize, 120));
 resize();
 
 function canvasPos(e) {
@@ -363,12 +395,13 @@ function canvasPos(e) {
   return { x: e.clientX - r.left, y: e.clientY - r.top };
 }
 
-function worldFromPointer() {
+function screenToWorld(sx, sy) {
   const z = ctx.zoom || 1;
-  return {
-    x: ctx.pointer.x / z + ctx.cam.x,
-    y: ctx.pointer.y / z + ctx.cam.y,
-  };
+  return { x: sx / z + ctx.cam.x, y: sy / z + ctx.cam.y };
+}
+
+function worldFromPointer() {
+  return screenToWorld(ctx.pointer.x, ctx.pointer.y);
 }
 
 function screenCenterWorld() {
@@ -379,8 +412,10 @@ function screenCenterWorld() {
   };
 }
 
-function updateAimFromPointer() {
-  const w = worldFromPointer();
+function updateAimFromScreen(sx, sy) {
+  ctx.pointer.x = sx;
+  ctx.pointer.y = sy;
+  const w = screenToWorld(sx, sy);
   const c = screenCenterWorld();
   ctx.aimAngle = Math.atan2(w.y - c.y, w.x - c.x);
   return w;
@@ -390,13 +425,11 @@ function clampCam() {
   const z = ctx.zoom || 1;
   const viewW = ctx.W / z;
   const viewH = ctx.H / z;
-  // Allow a little overscroll, but keep most of the arena visible
   const pad = 120;
   ctx.cam.x = Math.max(-pad, Math.min(WORLD_W - viewW + pad, ctx.cam.x));
   ctx.cam.y = Math.max(-pad, Math.min(WORLD_H - viewH + pad, ctx.cam.y));
 }
 
-/** Zoom so the world point under (sx,sy) screen stays fixed. */
 function zoomAt(sx, sy, nextZoom) {
   const prev = ctx.zoom;
   const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, nextZoom));
@@ -407,10 +440,8 @@ function zoomAt(sx, sy, nextZoom) {
   ctx.cam.x = wx - sx / next;
   ctx.cam.y = wy - sy / next;
   clampCam();
-  updateAimFromPointer();
 }
 
-/** Pan by screen-pixel delta (drag right → world moves right under cursor). */
 function panByScreen(dx, dy) {
   const z = ctx.zoom || 1;
   ctx.cam.x -= dx / z;
@@ -418,88 +449,220 @@ function panByScreen(dx, dy) {
   clampCam();
 }
 
-function wantsPan(e) {
-  // Middle mouse, or Alt+left-drag (Space stays spawn-only)
-  return e.button === 1 || (e.button === 0 && e.altKey);
+function pointerList() {
+  return [...pointers.values()];
 }
 
+function twoFingerMetrics() {
+  const pts = pointerList();
+  if (pts.length < 2) return null;
+  const a = pts[0];
+  const b = pts[1];
+  const midX = (a.x + b.x) / 2;
+  const midY = (a.y + b.y) / 2;
+  const dist = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  return { midX, midY, dist };
+}
+
+function beginToolAt(id, sx, sy, button) {
+  const w = updateAimFromScreen(sx, sy);
+  // Right mouse / long-press handled separately: grab
+  if (button === 2) {
+    ctx.grab.start(w.x, w.y, id);
+    return;
+  }
+  // Touch or left: hand tool grabs; other tools fire
+  if (TOOLS[toolIndex].id === 'hand') {
+    // Tap empty = nothing; on body = grab. If miss, two-finger will pan.
+    if (!ctx.grab.start(w.x, w.y, id) && isTouchPrimary) {
+      // single-finger drag on empty ground = pan
+      panPointerId = id;
+      pointers.get(id).role = 'pan';
+      pointers.get(id).lastX = sx;
+      pointers.get(id).lastY = sy;
+    }
+  } else {
+    toolPointerId = id;
+    leftDown = true;
+    ctx.pointer.down = true;
+    ctx.tools.use(TOOLS[toolIndex].id, true, true);
+  }
+}
+
+function endToolAt(id) {
+  if (toolPointerId === id) {
+    toolPointerId = null;
+    leftDown = false;
+    ctx.pointer.down = false;
+  }
+  if (panPointerId === id) panPointerId = null;
+  ctx.grab.end(id);
+}
+
+// ── pointer events ──
+canvas.style.touchAction = 'none';
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 canvas.addEventListener('pointerdown', (e) => {
   if (!playing) return;
+  e.preventDefault();
   sfx.unlock();
-  canvas.setPointerCapture?.(e.pointerId);
-  const p = canvasPos(e);
-  ctx.pointer.x = p.x;
-  ctx.pointer.y = p.y;
+  try { canvas.setPointerCapture(e.pointerId); } catch {}
 
-  if (wantsPan(e)) {
-    panning = true;
-    panLast = { x: p.x, y: p.y };
+  const p = canvasPos(e);
+  const isTouch = e.pointerType === 'touch';
+  pointers.set(e.pointerId, {
+    id: e.pointerId,
+    x: p.x,
+    y: p.y,
+    sx: p.x,
+    sy: p.y,
+    type: e.pointerType || 'mouse',
+    button: e.button,
+    role: 'pending',
+    lastX: p.x,
+    lastY: p.y,
+  });
+
+  // Middle mouse or Alt+left = pan
+  if (e.button === 1 || (e.button === 0 && e.altKey && !isTouch)) {
+    pointers.get(e.pointerId).role = 'pan';
+    panPointerId = e.pointerId;
     canvas.style.cursor = 'grabbing';
     return;
   }
 
-  const w = worldFromPointer();
-  if (e.button === 2) {
-    ctx.pointer.right = true;
-    ctx.grab.start(w.x, w.y);
-  } else if (e.button === 0) {
-    leftDown = true;
-    ctx.pointer.down = true;
-    if (TOOLS[toolIndex].id === 'hand') ctx.grab.start(w.x, w.y);
-    else ctx.tools.use(TOOLS[toolIndex].id, true, true);
-  }
-});
-
-canvas.addEventListener('pointermove', (e) => {
-  const p = canvasPos(e);
-  ctx.pointer.dx = p.x - ctx.pointer.x;
-  ctx.pointer.dy = p.y - ctx.pointer.y;
-  ctx.pointer.x = p.x;
-  ctx.pointer.y = p.y;
-
-  if (panning && panLast) {
-    panByScreen(p.x - panLast.x, p.y - panLast.y);
-    panLast = { x: p.x, y: p.y };
+  // Two+ fingers: enter pinch/pan gesture (cancel one-finger tool fire)
+  if (pointers.size >= 2) {
+    if (toolPointerId != null) {
+      leftDown = false;
+      ctx.pointer.down = false;
+      toolPointerId = null;
+    }
+    // keep grabs for multi-limb control unless pure pinch — if second finger
+    // is not on a body and hand tool, use pinch
+    const m = twoFingerMetrics();
+    if (m) {
+      pinchState = { dist: m.dist, midX: m.midX, midY: m.midY, zoom: ctx.zoom };
+      for (const pt of pointers.values()) pt.role = 'pinch';
+    }
+    // Second finger can also grab if on a body (multitouch ragdoll)
+    const w = screenToWorld(p.x, p.y);
+    const hit = bodyAt(people, w.x, w.y);
+    if (hit || TOOLS[toolIndex].id === 'hand') {
+      if (ctx.grab.start(w.x, w.y, e.pointerId)) {
+        pointers.get(e.pointerId).role = 'grab';
+        // still allow pinch if two grabs? pan/zoom with residual movement
+      }
+    }
     return;
   }
 
-  const w = updateAimFromPointer();
-  if (grabConstraint) ctx.grab.move(w.x, w.y);
+  // Single pointer
+  beginToolAt(e.pointerId, p.x, p.y, e.button);
 });
 
-canvas.addEventListener('pointerup', (e) => {
-  if (panning && (e.button === 1 || e.button === 0)) {
-    panning = false;
-    panLast = null;
-    canvas.style.cursor = 'none';
+canvas.addEventListener('pointermove', (e) => {
+  const rec = pointers.get(e.pointerId);
+  if (!rec) {
+    // hover aim for mouse
+    if (e.pointerType === 'mouse') {
+      const p = canvasPos(e);
+      updateAimFromScreen(p.x, p.y);
+    }
+    return;
   }
-  if (e.button === 2) {
-    ctx.pointer.right = false;
-    ctx.grab.end();
+  e.preventDefault();
+  const p = canvasPos(e);
+  const prevX = rec.x;
+  const prevY = rec.y;
+  rec.x = p.x;
+  rec.y = p.y;
+
+  // Primary aim follows last moved tool/grab finger
+  if (rec.role !== 'pinch' || pointers.size < 2) {
+    updateAimFromScreen(p.x, p.y);
   }
-  if (e.button === 0 && !e.altKey) {
+
+  // Two-finger pinch + pan
+  if (pointers.size >= 2 && pinchState) {
+    const m = twoFingerMetrics();
+    if (m && m.dist > 8) {
+      // pan by midpoint movement
+      panByScreen(m.midX - pinchState.midX, m.midY - pinchState.midY);
+      // zoom by distance ratio
+      const scale = m.dist / pinchState.dist;
+      zoomAt(m.midX, m.midY, pinchState.zoom * scale);
+      pinchState = { dist: m.dist, midX: m.midX, midY: m.midY, zoom: ctx.zoom };
+    }
+    // also move any grabs
+    for (const [id, pt] of pointers) {
+      if (activeGrabs.has(id)) {
+        const ww = screenToWorld(pt.x, pt.y);
+        ctx.grab.move(ww.x, ww.y, id);
+      }
+    }
+    return;
+  }
+
+  // Single-finger pan (empty drag or middle/alt)
+  if (rec.role === 'pan' || panPointerId === e.pointerId) {
+    panByScreen(p.x - prevX, p.y - prevY);
+    rec.lastX = p.x;
+    rec.lastY = p.y;
+    return;
+  }
+
+  // Grab follow
+  if (activeGrabs.has(e.pointerId)) {
+    const w = screenToWorld(p.x, p.y);
+    ctx.grab.move(w.x, w.y, e.pointerId);
+  }
+});
+
+function releasePointer(e) {
+  const id = e.pointerId;
+  endToolAt(id);
+  pointers.delete(id);
+
+  if (pointers.size < 2) pinchState = null;
+
+  // If one finger remains after pinch, reassign aim
+  if (pointers.size === 1) {
+    const only = pointerList()[0];
+    updateAimFromScreen(only.x, only.y);
+    if (only.role === 'pinch') only.role = 'pending';
+  }
+  if (pointers.size === 0) {
     leftDown = false;
     ctx.pointer.down = false;
-    if (TOOLS[toolIndex].id === 'hand') ctx.grab.end();
+    toolPointerId = null;
+    panPointerId = null;
+    canvas.style.cursor = isTouchPrimary ? 'default' : 'none';
+  }
+  try { canvas.releasePointerCapture?.(id); } catch {}
+}
+
+canvas.addEventListener('pointerup', releasePointer);
+canvas.addEventListener('pointercancel', releasePointer);
+
+canvas.addEventListener('pointerleave', (e) => {
+  // Only clear mouse hover; keep touches
+  if (e.pointerType === 'mouse' && pointers.size === 0) {
+    leftDown = false;
+    ctx.pointer.down = false;
   }
 });
 
-canvas.addEventListener('pointerleave', () => {
-  leftDown = false;
-  ctx.pointer.down = false;
-  panning = false;
-  panLast = null;
-  ctx.grab.end();
-  canvas.style.cursor = 'none';
-});
+// Prevent iOS page scroll/bounce on the stage
+document.getElementById('stage-wrap')?.addEventListener('touchmove', (e) => {
+  if (playing) e.preventDefault();
+}, { passive: false });
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   if (!playing) return;
-  // Trackpad + mouse: exponential zoom proportional to delta (smooth, not stepped jumps)
-  const sensitivity = e.deltaMode === 1 ? 0.05 : 0.0012; // lines vs pixels
+  const sensitivity = e.deltaMode === 1 ? 0.05 : 0.0012;
   const factor = Math.exp(-e.deltaY * sensitivity);
   zoomAt(ctx.pointer.x, ctx.pointer.y, ctx.zoom * factor);
 }, { passive: false });
@@ -525,7 +688,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); spawnPerson(); }
   if (e.code === 'KeyC') spawnCrowd(8);
   if (e.code === 'KeyP') togglePause();
-  if (e.code === 'Escape') ctx.grab.end();
+  if (e.code === 'Escape') ctx.grab.endAll();
   if (e.code === 'Tab') {
     e.preventDefault();
     setTool(toolIndex + (e.shiftKey ? -1 : 1));
@@ -623,35 +786,30 @@ function drawVignette() {
 }
 
 function drawCrosshair() {
+  // On touch, draw a reticle at each active contact; on mouse, one at pointer
   const c = ctx2d;
-  const mx = ctx.pointer.x;
-  const my = ctx.pointer.y;
   const tool = TOOLS[toolIndex];
-  c.save();
-  c.translate(mx, my);
-  c.strokeStyle = 'rgba(201,162,39,0.9)';
-  c.lineWidth = 1.5;
-  const r = tool.id === 'hand' ? 14 : 18;
-  c.beginPath();
-  c.arc(0, 0, r, 0, Math.PI * 2);
-  c.stroke();
-  c.beginPath();
-  c.moveTo(-r - 4, 0); c.lineTo(-4, 0);
-  c.moveTo(4, 0); c.lineTo(r + 4, 0);
-  c.moveTo(0, -r - 4); c.lineTo(0, -4);
-  c.moveTo(0, 4); c.lineTo(0, r + 4);
-  c.stroke();
-  if (tool.id !== 'hand' && tool.id !== 'mine' && tool.id !== 'spikes' && tool.id !== 'anvil') {
-    const ang = ctx.aimAngle || 0;
-    c.strokeStyle = 'rgba(201,162,39,0.28)';
-    c.setLineDash([4, 6]);
+  const pts = pointers.size
+    ? pointerList().map((p) => ({ x: p.x, y: p.y }))
+    : [{ x: ctx.pointer.x, y: ctx.pointer.y }];
+
+  for (const pt of pts) {
+    c.save();
+    c.translate(pt.x, pt.y);
+    c.strokeStyle = 'rgba(201,162,39,0.9)';
+    c.lineWidth = 1.5;
+    const r = isTouchPrimary ? 22 : (tool.id === 'hand' ? 14 : 18);
     c.beginPath();
-    c.moveTo(0, 0);
-    c.lineTo(Math.cos(ang) * 80, Math.sin(ang) * 80);
+    c.arc(0, 0, r, 0, Math.PI * 2);
     c.stroke();
-    c.setLineDash([]);
+    c.beginPath();
+    c.moveTo(-r - 4, 0); c.lineTo(-4, 0);
+    c.moveTo(4, 0); c.lineTo(r + 4, 0);
+    c.moveTo(0, -r - 4); c.lineTo(0, -4);
+    c.moveTo(0, 4); c.lineTo(0, r + 4);
+    c.stroke();
+    c.restore();
   }
-  c.restore();
 }
 
 // ─── Loop ───
@@ -744,12 +902,12 @@ function frame(now) {
   ctx.tools.draw(c, ctx.cam);
   ctx.fx.draw(c, ctx.cam, viewW, viewH);
 
-  // grab rope
-  if (grabConstraint && grabBody) {
-    const ax = grabConstraint.pointA.x - ctx.cam.x;
-    const ay = grabConstraint.pointA.y - ctx.cam.y;
-    const bx = grabBody.position.x - ctx.cam.x;
-    const by = grabBody.position.y - ctx.cam.y;
+  // grab ropes (multitouch)
+  activeGrabs.forEach((g) => {
+    const ax = g.constraint.pointA.x - ctx.cam.x;
+    const ay = g.constraint.pointA.y - ctx.cam.y;
+    const bx = g.body.position.x - ctx.cam.x;
+    const by = g.body.position.y - ctx.cam.y;
     c.save();
     c.strokeStyle = 'rgba(201,162,39,0.85)';
     c.lineWidth = 2.5;
@@ -762,7 +920,7 @@ function frame(now) {
     c.arc(ax, ay, 6, 0, Math.PI * 2);
     c.fill();
     c.restore();
-  }
+  });
 
   c.restore();
 

@@ -45,7 +45,7 @@ export function createToolSystem(ctx) {
     const m = mouseWorld();
     switch (toolId) {
       case 'hand':
-        if (justPressed) ctx.grab.start(m.x, m.y);
+        if (justPressed) ctx.grab.start(m.x, m.y, 'tool');
         break;
       case 'pistol':
         if (justPressed) fireBullet(m, 1, 22, 28, 18);

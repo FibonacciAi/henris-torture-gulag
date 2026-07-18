@@ -2,12 +2,17 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#12100e" />
+  <meta name="description" content="Henri's Torture Gulag — physics ragdoll sandbox. Grab, maim, explode. Works on iPad." />
   <title>HENRI'S TORTURE GULAG</title>
   <link rel="stylesheet" href="css/style.css" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
 </head>
-<body>
+<body class="boot">
   <div id="app">
     <header id="topbar">
       <div class="brand">
@@ -49,13 +54,17 @@
             Grab. Throw. Sever. Document the suffering.
           </p>
           <button type="button" id="btn-enter" class="btn-enter">REPORT FOR DUTY</button>
-          <p class="title-keys">Middle-drag pan · Scroll zoom · Right-drag grab · Left-click tools · Space inmate</p>
+          <p class="title-keys desktop-only">Middle-drag pan · Scroll zoom · Right-drag grab · Left-click tools</p>
+          <p class="title-keys touch-only">1 finger: tool / grab · 2 fingers: pan + pinch zoom · Toolbar below</p>
         </div>
       </div>
 
       <div id="combo" class="combo hidden"><b>x2</b><span>COMBO</span></div>
-      <div id="hint" class="hint">
-        <b>Middle-drag</b> pan · <b>Scroll</b> zoom · <b>Right-drag</b> grab · <b>Left-click</b> tool · <b>Space</b> inmate
+      <div id="hint" class="hint desktop-only">
+        <b>Middle-drag</b> pan · <b>Scroll</b> zoom · <b>Right-drag</b> grab · <b>Left-click</b> tool
+      </div>
+      <div id="hint-touch" class="hint touch-only">
+        <b>1 finger</b> tool/grab · <b>2 fingers</b> pan + pinch · pick tools below
       </div>
       <div id="toast" class="toast hidden"></div>
     </div>
