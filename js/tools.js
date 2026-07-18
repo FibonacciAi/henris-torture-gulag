@@ -677,8 +677,6 @@ export function createToolSystem(ctx) {
       c.strokeStyle = b.color;
       c.lineWidth = b.wide || (b.jagged ? 2 : 2.5);
       c.globalAlpha = Math.max(0, b.life * 8);
-      c.shadowColor = b.color;
-      c.shadowBlur = 12;
       c.beginPath();
       if (b.jagged) {
         const steps = 8;
