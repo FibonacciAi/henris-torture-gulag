@@ -11,6 +11,8 @@ cd games/henris-torture-gulag
 python3 -m http.server 8780
 ```
 
+**Live:** [https://fibonacciai.github.io/henris-torture-gulag/](https://fibonacciai.github.io/henris-torture-gulag/)
+
 Open **http://localhost:8780**
 
 ## Controls
