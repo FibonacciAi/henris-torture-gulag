@@ -208,9 +208,9 @@ export function createFx() {
       const a = Math.max(0, p.life / p.max);
       ctx.save();
       ctx.globalAlpha = a;
+      // Skip heavy shadowBlur — it tanks perf and smears under camera zoom
       if (p.glow) {
-        ctx.shadowColor = p.color;
-        ctx.shadowBlur = 12;
+        ctx.globalAlpha = a * 0.9;
       }
       ctx.fillStyle = p.color;
       const x = p.x - cam.x;

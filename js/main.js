@@ -37,6 +37,7 @@ const ctx = {
   killPerson,
   pointer: { x: 0, y: 0, dx: 0, dy: 0, down: false, right: false },
   cam: { x: 0, y: 0 },
+  zoom: 1,
   W: 800,
   H: 600,
   floorY: 560,
@@ -270,8 +271,9 @@ function syncStats() {
 // ─── Input ───
 const keys = {};
 let leftDown = false;
-let zoom = 1;
+let zoom = 1; // mirrored on ctx.zoom
 let playing = false;
+ctx.zoom = 1;
 
 function resize() {
   const wrap = document.getElementById('stage-wrap');
@@ -293,10 +295,26 @@ function canvasPos(e) {
 }
 
 function worldFromPointer() {
+  const z = ctx.zoom || 1;
   return {
-    x: ctx.pointer.x / zoom + ctx.cam.x,
-    y: ctx.pointer.y / zoom + ctx.cam.y,
+    x: ctx.pointer.x / z + ctx.cam.x,
+    y: ctx.pointer.y / z + ctx.cam.y,
   };
+}
+
+function screenCenterWorld() {
+  const z = ctx.zoom || 1;
+  return {
+    x: ctx.cam.x + ctx.W / (2 * z),
+    y: ctx.cam.y + ctx.H / (2 * z),
+  };
+}
+
+function updateAimFromPointer() {
+  const w = worldFromPointer();
+  const c = screenCenterWorld();
+  ctx.aimAngle = Math.atan2(w.y - c.y, w.x - c.x);
+  return w;
 }
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -327,11 +345,7 @@ canvas.addEventListener('pointermove', (e) => {
   ctx.pointer.dy = p.y - ctx.pointer.y;
   ctx.pointer.x = p.x;
   ctx.pointer.y = p.y;
-  // update aim continuously
-  const w = worldFromPointer();
-  const cx = ctx.cam.x + ctx.W * 0.32;
-  const cy = ctx.cam.y + ctx.H * 0.58;
-  ctx.aimAngle = Math.atan2(w.y - cy, w.x - cx);
+  const w = updateAimFromPointer();
   if (grabConstraint) ctx.grab.move(w.x, w.y);
 });
 
@@ -355,13 +369,19 @@ canvas.addEventListener('pointerleave', () => {
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  const prev = zoom;
-  zoom = Math.min(1.75, Math.max(0.5, zoom - e.deltaY * 0.0012));
-  // zoom toward cursor
+  if (!playing) return;
+  const prev = ctx.zoom;
+  // Smooth, less twitchy zoom
+  const next = Math.min(1.6, Math.max(0.6, prev * (e.deltaY > 0 ? 0.92 : 1.08)));
+  if (next === prev) return;
+  // Keep world point under cursor fixed
   const wx = ctx.pointer.x / prev + ctx.cam.x;
   const wy = ctx.pointer.y / prev + ctx.cam.y;
-  ctx.cam.x = wx - ctx.pointer.x / zoom;
-  ctx.cam.y = wy - ctx.pointer.y / zoom;
+  ctx.zoom = next;
+  zoom = next;
+  ctx.cam.x = wx - ctx.pointer.x / next;
+  ctx.cam.y = wy - ctx.pointer.y / next;
+  updateAimFromPointer();
 }, { passive: false });
 
 window.addEventListener('keydown', (e) => {
@@ -475,16 +495,19 @@ function drawEnvironment(time) {
   }
 
   // neon floor line
-  c.save();
-  c.shadowColor = '#ff3d5a';
-  c.shadowBlur = 12;
-  c.strokeStyle = 'rgba(255,61,90,0.7)';
+  c.strokeStyle = 'rgba(255,61,90,0.75)';
   c.lineWidth = 2.5;
   c.beginPath();
   c.moveTo(0 - ctx.cam.x, ctx.floorY - ctx.cam.y);
   c.lineTo(WORLD_W - ctx.cam.x, ctx.floorY - ctx.cam.y);
   c.stroke();
-  c.restore();
+  // soft glow without shadowBlur (stable under zoom)
+  c.strokeStyle = 'rgba(255,61,90,0.2)';
+  c.lineWidth = 6;
+  c.beginPath();
+  c.moveTo(0 - ctx.cam.x, ctx.floorY - ctx.cam.y);
+  c.lineTo(WORLD_W - ctx.cam.x, ctx.floorY - ctx.cam.y);
+  c.stroke();
 }
 
 function drawVignette() {
@@ -558,35 +581,29 @@ function frame(now) {
       }
     }
 
-    // edge pan
-    const edge = 48;
-    const panSpeed = 520 * dt / zoom;
-    if (ctx.pointer.x < edge) ctx.cam.x -= panSpeed * (1 - ctx.pointer.x / edge);
-    if (ctx.pointer.x > ctx.W - edge) ctx.cam.x += panSpeed * ((ctx.pointer.x - (ctx.W - edge)) / edge);
-    if (ctx.pointer.y < edge) ctx.cam.y -= panSpeed * (1 - ctx.pointer.y / edge);
-    if (ctx.pointer.y > ctx.H - edge) ctx.cam.y += panSpeed * ((ctx.pointer.y - (ctx.H - edge)) / edge);
-
-    const pan = 480 * dt / zoom;
+    const z = ctx.zoom || 1;
+    // Arrow / WASD pan only (no auto edge-pan — it fights aiming)
+    const pan = 520 * dt / z;
     if (keys.ArrowLeft || keys.KeyA) ctx.cam.x -= pan;
     if (keys.ArrowRight || keys.KeyD) ctx.cam.x += pan;
     if (keys.ArrowUp) ctx.cam.y -= pan;
     if (keys.ArrowDown || keys.KeyS) ctx.cam.y += pan;
 
+    // Gentle follow while grabbing — don't hard-lock the camera
     if (grabBody) {
-      const tx = grabBody.position.x - ctx.W / (2 * zoom);
-      const ty = grabBody.position.y - ctx.H / (2 * zoom);
-      ctx.cam.x += (tx - ctx.cam.x) * 0.05;
-      ctx.cam.y += (ty - ctx.cam.y) * 0.05;
+      const tx = grabBody.position.x - ctx.W / (2 * z);
+      const ty = grabBody.position.y - ctx.H / (2 * z);
+      ctx.cam.x += (tx - ctx.cam.x) * 0.03;
+      ctx.cam.y += (ty - ctx.cam.y) * 0.03;
     }
 
-    ctx.cam.x = Math.max(-80, Math.min(WORLD_W - ctx.W / zoom + 80, ctx.cam.x));
-    ctx.cam.y = Math.max(-100, Math.min(WORLD_H - ctx.H / zoom + 60, ctx.cam.y));
+    const viewW = ctx.W / z;
+    const viewH = ctx.H / z;
+    ctx.cam.x = Math.max(-80, Math.min(WORLD_W - viewW + 80, ctx.cam.x));
+    ctx.cam.y = Math.max(-100, Math.min(WORLD_H - viewH + 60, ctx.cam.y));
 
-    // multi-step physics when not in deep slow-mo
-    const steps = timeScale < 0.5 ? 1 : 2;
-    for (let i = 0; i < steps; i++) {
-      Engine.update(engine, (1000 / 60) * timeScale);
-    }
+    // Single physics step — double-step made impacts/FX feel glitchy
+    Engine.update(engine, (1000 / 60) * timeScale);
 
     if (leftDown && TOOLS[toolIndex].id !== 'hand') {
       ctx.tools.use(TOOLS[toolIndex].id, true, false);
@@ -614,10 +631,12 @@ function frame(now) {
   c.fillStyle = grd;
   c.fillRect(0, 0, ctx.W, ctx.H);
 
-  const sx = ctx.shake ? (Math.random() - 0.5) * ctx.shake * 12 : 0;
-  const sy = ctx.shake ? (Math.random() - 0.5) * ctx.shake * 12 : 0;
+  const z = ctx.zoom || 1;
+  // Shake in screen space (after zoom) so zoomed-in camera doesn't amplify it
+  const sx = ctx.shake ? (Math.random() - 0.5) * ctx.shake * 8 : 0;
+  const sy = ctx.shake ? (Math.random() - 0.5) * ctx.shake * 8 : 0;
   c.translate(sx, sy);
-  c.scale(zoom, zoom);
+  c.scale(z, z);
 
   drawEnvironment(time);
   ctx.fx.drawDecals(c, ctx.cam);
@@ -634,8 +653,6 @@ function frame(now) {
     c.save();
     c.strokeStyle = 'rgba(84,211,222,0.85)';
     c.lineWidth = 2.5;
-    c.shadowColor = '#54d3de';
-    c.shadowBlur = 8;
     c.beginPath();
     c.moveTo(ax, ay);
     c.lineTo(bx, by);

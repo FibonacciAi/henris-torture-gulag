@@ -33,9 +33,11 @@ export function createToolSystem(ctx) {
   let flameHeat = 0;
 
   function mouseWorld() {
+    // Must match main.js worldFromPointer (screen → world with zoom)
+    const z = ctx.zoom || 1;
     return {
-      x: ctx.pointer.x + ctx.cam.x,
-      y: ctx.pointer.y + ctx.cam.y,
+      x: ctx.pointer.x / z + ctx.cam.x,
+      y: ctx.pointer.y / z + ctx.cam.y,
     };
   }
 
@@ -114,23 +116,15 @@ export function createToolSystem(ctx) {
   }
 
   function aimDir(m) {
-    // Fire from a virtual muzzle slightly behind the cursor along aim vector.
-    // Prefer last aim if set; otherwise aim rightward from left of cursor.
-    let ang = ctx.aimAngle;
-    if (ang == null || Number.isNaN(ang)) {
-      const cx = ctx.cam.x + ctx.W * 0.28;
-      const cy = ctx.cam.y + ctx.H * 0.55;
-      ang = Math.atan2(m.y - cy, m.x - cx);
-    }
-    // Update aim from camera center to mouse for natural gunplay
-    {
-      const cx = ctx.cam.x + ctx.W * 0.32;
-      const cy = ctx.cam.y + ctx.H * 0.58;
-      ang = Math.atan2(m.y - cy, m.x - cx);
-      ctx.aimAngle = ang;
-    }
-    const ox = m.x - Math.cos(ang) * 48;
-    const oy = m.y - Math.sin(ang) * 48;
+    // Aim from viewport center (world) through the cursor so shots track the crosshair.
+    const z = ctx.zoom || 1;
+    const cx = ctx.cam.x + (ctx.W * 0.5) / z;
+    const cy = ctx.cam.y + (ctx.H * 0.55) / z;
+    const ang = Math.atan2(m.y - cy, m.x - cx);
+    ctx.aimAngle = ang;
+    // Muzzle just behind the cursor along the aim line (bullet path goes through cursor)
+    const ox = m.x - Math.cos(ang) * 28;
+    const oy = m.y - Math.sin(ang) * 28;
     return { x: Math.cos(ang), y: Math.sin(ang), ox, oy, ang };
   }
 
