@@ -121,6 +121,8 @@ export function createRagdoll(world, x, y, stats, palette) {
     severed: new Set(),
     onFire: 0,
     bleeds: [],
+    // Don't take fall/impact damage while settling after spawn
+    spawnGrace: 2.8,
   };
 
   for (const b of Object.values(parts)) {
@@ -129,9 +131,12 @@ export function createRagdoll(world, x, y, stats, palette) {
   }
   for (const j of joints) Composite.add(world, j);
 
-  // slight random toss so they don't stack perfectly
-  Body.setVelocity(torso, { x: (Math.random() - 0.5) * 2, y: -1 });
-  Body.setAngularVelocity(torso, (Math.random() - 0.5) * 0.05);
+  // Gentle settle — no slam into the floor on deploy
+  Body.setVelocity(torso, { x: (Math.random() - 0.5) * 0.8, y: 0.2 });
+  Body.setAngularVelocity(torso, (Math.random() - 0.5) * 0.02);
+  for (const b of Object.values(parts)) {
+    Body.setVelocity(b, { x: torso.velocity.x, y: Math.min(2, Math.max(0, b.velocity.y)) });
+  }
 
   stats.people += 1;
   return person;
@@ -274,15 +279,38 @@ export function applyImpactDamage(pair, ctx) {
   const a = pair.bodyA;
   const b = pair.bodyB;
   const speed = Vector.magnitude(Vector.sub(a.velocity, b.velocity));
-  if (speed < 5.5) return;
+  // Ignore soft landings / jostling — only real violence
+  if (speed < 14) return;
 
   for (const body of [a, b]) {
     const person = body.plugin?.person;
     const part = body.plugin?.part;
     if (!person || !part) continue;
+    if ((person.spawnGrace || 0) > 0) continue;
+
     const other = body === a ? b : a;
-    const dmg = Math.min(62, (speed - 5) * 2.4 * (other.isStatic ? 1.5 : other.plugin?.anvil ? 2.2 : 0.75));
-    if (dmg < 3.5) continue;
+    const isFloorish = other.isStatic && (other.label === 'wall' || other.label === 'prop');
+    const isAnvil = !!other.plugin?.anvil;
+    const isSpike = !!other.plugin?.spike;
+
+    // Normal floor/table landings never hurt — only extreme splats (yeeted into ground)
+    if (isFloorish && !isAnvil && !isSpike) {
+      if (speed < 28) continue;
+    }
+
+    let mul = 0.75;
+    if (isAnvil) mul = 2.2;
+    else if (isSpike) mul = 1.8;
+    else if (isFloorish) mul = 1.1; // hard splat only
+    else if (other.isStatic) mul = 1.2;
+    else if (other.plugin?.person) mul = 0.55; // body-on-body soft
+
+    // Threshold so light bumps after grace still don't chip HP
+    const base = isFloorish ? 22 : 12;
+    if (speed < base) continue;
+
+    const dmg = Math.min(62, (speed - base) * 2.0 * mul);
+    if (dmg < 5) continue;
     const pt = pair.collision?.supports?.[0] || body.position;
     damagePart(person, part, dmg, pt, ctx);
     if (dmg > 14) {
@@ -294,6 +322,9 @@ export function applyImpactDamage(pair, ctx) {
 
 export function updatePeople(people, dt, ctx) {
   for (const person of people) {
+    if (person.spawnGrace > 0) {
+      person.spawnGrace = Math.max(0, person.spawnGrace - dt);
+    }
     // fire DoT
     if (person.onFire > 0) {
       person.onFire -= dt;
