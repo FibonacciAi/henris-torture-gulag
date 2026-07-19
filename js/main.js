@@ -11,7 +11,18 @@ import {
 import { TOOLS, createToolSystem, setToolSprites } from './tools.js';
 import { MAPS, WORLD_W, WORLD_H, buildMapWorld, getMap, drawMapProps } from './maps.js';
 
-const { Engine, Bodies, Body, Composite, Constraint, Events, Vector } = Matter;
+// Local vendor first — CDN-blocked iPads used to die here with a white load screen
+const MatterNS = globalThis.Matter;
+if (!MatterNS) {
+  const el = document.getElementById('loading');
+  if (el) {
+    el.textContent = 'PHYSICS FAILED — RELOAD';
+    el.style.pointerEvents = 'auto';
+    el.onclick = () => location.reload();
+  }
+  throw new Error('Matter.js not found. Check js/vendor/matter.min.js');
+}
+const { Engine, Bodies, Body, Composite, Constraint, Events, Vector } = MatterNS;
 
 const canvas = document.getElementById('c');
 const ctx2d = canvas.getContext('2d');
@@ -265,7 +276,12 @@ ctx.grab = {
 };
 
 // Build default arena once grab system exists
-loadMap('gulag', { quiet: true });
+try {
+  loadMap('gulag', { quiet: true });
+} catch (err) {
+  console.error('Initial map failed', err);
+  ctx.floorY = WORLD_H - 48;
+}
 
 // ─── Tools UI ───
 ctx.tools = createToolSystem(ctx);
@@ -1124,14 +1140,31 @@ document.getElementById('btn-cam')?.addEventListener('pointerup', (e) => {
   }
 });
 
-// boot
+// boot — ALWAYS leave the loading screen (timeout / errors included)
 async function boot() {
   const loading = document.getElementById('loading');
+  const showTitle = () => {
+    if (loading) loading.classList.add('hidden');
+    document.getElementById('title-screen')?.classList.remove('hidden');
+  };
+  // Absolute failsafe: never stay on OPENING THE GULAG more than 12s
+  const failsafe = setTimeout(() => {
+    console.warn('Boot failsafe fired');
+    try {
+      buildToolbar();
+      buildMapPicker();
+      setTool(0);
+    } catch (e) { console.warn(e); }
+    showTitle();
+    requestAnimationFrame(frame);
+  }, 12000);
+
   try {
+    if (loading) loading.textContent = 'LOADING ASSETS…';
     SPRITES = await loadAll();
     setSprites(SPRITES);
     setToolSprites(SPRITES);
-    if (SPRITES.logo) {
+    if (SPRITES?.logo) {
       const logoEl = document.getElementById('logo-img');
       if (logoEl) {
         logoEl.src = 'assets/ui/logo.png';
@@ -1143,21 +1176,32 @@ async function boot() {
         titleLogo.classList.remove('hidden');
       }
     }
-    if (SPRITES.keyart) {
+    if (SPRITES?.keyart) {
       const ka = document.getElementById('title-keyart');
-      if (ka) {
-        ka.style.backgroundImage = `url('assets/ui/keyart.jpg')`;
-      }
+      if (ka) ka.style.backgroundImage = `url('assets/ui/keyart.jpg')`;
     }
+    buildToolbar();
+    buildMapPicker();
+    setTool(0);
+    clearTimeout(failsafe);
+    showTitle();
+    requestAnimationFrame(frame);
   } catch (err) {
-    console.warn('Asset load failed', err);
+    console.error('Boot failed', err);
+    clearTimeout(failsafe);
+    if (loading) {
+      loading.textContent = 'LOAD ERROR — TAP TO CONTINUE';
+      loading.style.cursor = 'pointer';
+      loading.onclick = () => {
+        showTitle();
+        try { buildToolbar(); buildMapPicker(); setTool(0); } catch {}
+        requestAnimationFrame(frame);
+      };
+    } else {
+      showTitle();
+      requestAnimationFrame(frame);
+    }
   }
-  buildToolbar();
-  buildMapPicker();
-  setTool(0);
-  if (loading) loading.classList.add('hidden');
-  document.getElementById('title-screen')?.classList.remove('hidden');
-  requestAnimationFrame(frame);
 }
 
 boot();

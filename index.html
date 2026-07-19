@@ -11,8 +11,7 @@
   <meta name="theme-color" content="#12100e" />
   <meta name="description" content="Henri's Torture Gulag — physics ragdoll sandbox. Grab, maim, explode. Works on iPad." />
   <title>HENRI'S TORTURE GULAG</title>
-  <link rel="stylesheet" href="css/style.css?v=ipad4" />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css?v=ipad5" />
   <script>
     // Early iPadOS detect (before CSS paint) — iPadOS 13+ pretends to be Mac
     (function () {
@@ -97,7 +96,22 @@
     </footer>
   </div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
-  <script type="module" src="js/main.js?v=ipad4"></script>
+  <!-- Local physics (no CDN — school iPads often block cdnjs) -->
+  <script src="js/vendor/matter.min.js"></script>
+  <script type="module" src="js/main.js?v=ipad5"></script>
+  <script>
+    // Absolute escape hatch if module boot never finishes
+    setTimeout(function () {
+      var loading = document.getElementById('loading');
+      var title = document.getElementById('title-screen');
+      if (!loading || loading.classList.contains('hidden')) return;
+      loading.textContent = 'STILL LOADING… TAP TO CONTINUE';
+      loading.style.cursor = 'pointer';
+      loading.onclick = function () {
+        loading.classList.add('hidden');
+        if (title) title.classList.remove('hidden');
+      };
+    }, 6000);
+  </script>
 </body>
 </html>

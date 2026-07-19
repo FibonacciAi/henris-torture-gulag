@@ -3,7 +3,9 @@
  * Big playgrounds: arctic, hellscape, candy, moon, jungle, carnival, gulag.
  */
 
-const Bodies = globalThis.Matter?.Bodies;
+function getBodies() {
+  return globalThis.Matter?.Bodies;
+}
 
 export const WORLD_W = 5600;
 export const WORLD_H = 1600;
@@ -32,6 +34,7 @@ function propOpts(extra = {}) {
 }
 
 function rect(x, y, w, h, opts) {
+  const Bodies = getBodies();
   if (!Bodies) throw new Error('Matter.js failed to load');
   return Bodies.rectangle(x, y, w, h, opts);
 }

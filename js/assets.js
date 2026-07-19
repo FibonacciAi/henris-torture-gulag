@@ -2,16 +2,32 @@
 
 const cache = new Map();
 
-export function loadImage(src) {
+export function loadImage(src, timeoutMs = 6000) {
   if (cache.has(src)) return cache.get(src);
   const p = new Promise((resolve) => {
     const img = new Image();
-    img.onload = () => resolve(img);
+    let settled = false;
+    const finish = (val) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(val);
+    };
+    const timer = setTimeout(() => {
+      console.warn('Asset timeout', src);
+      finish(null);
+    }, timeoutMs);
+    img.onload = () => finish(img);
     img.onerror = () => {
       console.warn('Missing asset', src);
-      resolve(null);
+      finish(null);
     };
-    img.src = src;
+    // Absolute-ish paths from site root help GH Pages + nested routes
+    try {
+      img.src = new URL(src, window.location.href).href;
+    } catch {
+      img.src = src;
+    }
   });
   cache.set(src, p);
   return p;
@@ -60,11 +76,16 @@ export async function loadAll() {
   };
 
   const out = {};
-  await Promise.all(
+  // Hard ceiling so we never sit on OPENING THE GULAG forever
+  const all = Promise.all(
     Object.entries(paths).map(async ([k, src]) => {
       out[k] = await loadImage(src);
     })
   );
+  await Promise.race([
+    all,
+    new Promise((resolve) => setTimeout(resolve, 10000)),
+  ]);
   return out;
 }
 
