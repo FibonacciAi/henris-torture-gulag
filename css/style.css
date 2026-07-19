@@ -19,6 +19,8 @@
 html, body {
   height: 100%;
   height: 100dvh;
+  min-height: 100%;
+  min-height: -webkit-fill-available;
   background: var(--bg);
   color: var(--text);
   font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
@@ -28,6 +30,9 @@ html, body {
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
   overscroll-behavior: none;
+  position: fixed;
+  inset: 0;
+  width: 100%;
 }
 
 /* Touch vs desktop helpers */
@@ -45,8 +50,12 @@ html.touch-ui .hint.touch-only {
 
 #app {
   height: 100%;
+  height: 100dvh;
+  max-height: 100dvh;
+  max-height: -webkit-fill-available;
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
 /* ── Map picker ── */
@@ -553,69 +562,129 @@ html.touch-ui #c {
   font-size: 12px;
 }
 
+/* Floating camera reset (iPad) */
+.btn-cam {
+  display: none;
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 15;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 1px solid #5a4a30;
+  background: rgba(20, 16, 12, 0.82);
+  color: var(--accent-2);
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+html.touch-ui.playing .btn-cam,
+html.touch-ui #app.playing .btn-cam {
+  display: grid;
+  place-items: center;
+}
+html.touch-ui .btn-cam.touch-only { display: none; }
+html.touch-ui #app.playing .btn-cam.touch-only {
+  display: grid;
+  place-items: center;
+}
+
 /* ── Responsive / iPad ── */
 @media (max-width: 900px), (hover: none) and (pointer: coarse) {
   #topbar {
-    gap: 8px;
-    padding: 8px 10px;
-    padding-top: max(8px, env(safe-area-inset-top));
+    gap: 6px;
+    padding: 6px 8px;
+    padding-top: max(6px, env(safe-area-inset-top));
+    flex-wrap: nowrap;
   }
 
-  .brand { min-width: 0; flex: 1 1 auto; }
-  .brand h1 { font-size: 11px; max-width: 160px; }
+  .brand { min-width: 0; flex: 0 1 auto; }
+  .brand h1 { font-size: 10px; max-width: 120px; }
+  .brand .logo-img, .brand .logo { width: 32px; height: 32px; }
   .tag { display: none; }
 
+  /* Keep stats on one compact row — don't steal a full second line if we can help it */
   .stats {
-    order: 3;
-    flex: 1 1 100%;
-    justify-content: space-between;
-    gap: 4px;
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    gap: 3px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .stats > div {
-    min-width: 0;
-    flex: 1;
-    padding: 4px;
+    min-width: 48px;
+    flex: 0 0 auto;
+    padding: 3px 5px;
+  }
+
+  /* Hide the least-critical counters on tablet to free chrome */
+  .stats > div:nth-child(4),
+  .stats > div:nth-child(5) {
+    display: none;
   }
 
   .stats span { font-size: 7px; }
   .stats b { font-size: 12px; }
 
+  .top-actions { flex: 0 0 auto; gap: 4px; }
   .btn {
-    padding: 10px 12px;
-    font-size: 11px;
-    min-height: 44px;
+    padding: 8px 10px;
+    font-size: 10px;
+    min-height: 40px;
   }
 
+  /* Map bar: emoji-first, short */
+  #map-bar {
+    padding: 4px 8px;
+    gap: 6px;
+  }
+  .map-current { display: none; }
+  .map-btn {
+    padding: 6px 8px;
+    min-height: 36px;
+  }
+  .map-name { display: none; }
+  .map-emoji { font-size: 16px; }
+
   #toolbar {
-    padding: 8px 8px max(10px, env(safe-area-inset-bottom));
+    padding: 6px 6px max(8px, env(safe-area-inset-bottom));
   }
 
   .tool-row {
-    gap: 8px;
+    gap: 6px;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x proximity;
   }
 
   .tool-btn {
-    width: 72px;
-    height: 74px;
+    width: 64px;
+    height: 64px;
     scroll-snap-align: start;
     border-radius: 10px;
   }
 
   .tool-btn .tool-img {
-    width: 42px;
-    height: 42px;
+    width: 36px;
+    height: 36px;
   }
 
   .tool-btn .key { display: none; }
 
   .tool-meta {
     flex-direction: column;
-    gap: 2px;
+    gap: 0;
     align-items: flex-start;
+    max-width: 28%;
   }
+  #tool-desc { display: none; }
+  #tool-name { font-size: 11px; }
 
   .hint {
     font-size: 11px;
@@ -644,11 +713,16 @@ html.touch-ui #c {
   .title-lede br { display: none; }
 }
 
-@media (max-height: 500px) and (orientation: landscape) {
-  #topbar { padding: 4px 8px; }
+@media (max-height: 560px) and (orientation: landscape) {
+  #topbar { padding: 3px 6px; padding-top: max(3px, env(safe-area-inset-top)); }
   .stats { display: none; }
-  .tool-btn { width: 56px; height: 56px; }
-  .tool-btn .tool-img { width: 32px; height: 32px; }
+  .brand h1 { display: none; }
+  #map-bar { padding: 2px 6px; }
+  .map-btn { padding: 4px 6px; min-height: 32px; }
+  .tool-btn { width: 52px; height: 52px; }
+  .tool-btn .tool-img { width: 28px; height: 28px; }
+  #toolbar { padding: 4px 4px max(6px, env(safe-area-inset-bottom)); }
+  .tool-meta { display: none; }
   .title-card {
     padding: 12px 16px;
     max-height: 90vh;
@@ -656,4 +730,5 @@ html.touch-ui #c {
   }
   .title-card h2 { font-size: 22px; }
   .title-logo { width: 48px; height: 48px; }
+  .btn-cam { width: 42px; height: 42px; bottom: 8px; right: 8px; }
 }

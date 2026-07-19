@@ -654,8 +654,9 @@ export function drawPeople(ctx2d, people, cam, view) {
   const n = people.length;
   const viewW = view?.w ?? 1200;
   const viewH = view?.h ?? 800;
-  const drawShadows = n <= 12;
-  const simple = n > 18;
+  const drawShadows = n <= 10;
+  // Drop accessory washes earlier — iPad chokes on offscreen tint per limb
+  const simple = n > 12;
 
   for (const person of people) {
     if (person._removed) continue;
@@ -733,8 +734,8 @@ function drawPart(ctx, person, name, body, cam, simple = false) {
   }
 
   if (sprite) {
-    // Tint ONLY the sprite pixels (offscreen) — never fillRect on the main canvas
-    // (source-atop against the stage painted solid color boxes over the background).
+    // Tint ONLY the sprite pixels (offscreen) — never fillRect on the main canvas.
+    // Skip expensive offscreen washes under load / simple mode (iPad perf).
     if (!simple && person.tint && person.tintAlpha > 0.02) {
       drawTintedSprite(ctx, sprite, -sw / 2, -sh / 2, sw, sh, person.tint, person.tintAlpha);
     } else {
@@ -742,8 +743,6 @@ function drawPart(ctx, person, name, body, cam, simple = false) {
     }
 
     if (!simple) {
-      // Soft clothing wash — clipped to sprite alpha via destination-in style path:
-      // draw color then keep only where sprite was (using multiply is too harsh on bg).
       if ((name === 'torso' || name.startsWith('upperArm')) && person.shirt) {
         softSpriteWash(ctx, sprite, -sw / 2, -sh / 2, sw, sh, person.shirt, person.kindId === 'inmate' ? 0.2 : 0.32);
       }

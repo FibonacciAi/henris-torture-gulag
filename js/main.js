@@ -68,10 +68,17 @@ const ctx = {
   },
 };
 
-// Zoom range — keep people readable (must exist before loadMap/focusSpawnCam)
-const ZOOM_MIN = 0.7;
-const ZOOM_MAX = 2.0;
-const ZOOM_DEFAULT = 1.2;
+// Zoom — desktop a bit tighter; touch starts wider so floor + people fit the stage
+const isTouchPrimary = (() => {
+  try {
+    return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+  } catch {
+    return false;
+  }
+})();
+const ZOOM_MIN = isTouchPrimary ? 0.55 : 0.7;
+const ZOOM_MAX = isTouchPrimary ? 1.8 : 2.0;
+const ZOOM_DEFAULT = isTouchPrimary ? 0.92 : 1.15;
 ctx.zoom = ZOOM_DEFAULT;
 
 let toastT = 0;
@@ -438,33 +445,51 @@ function syncStats() {
 const keys = {};
 let leftDown = false;
 let playing = false;
-const isTouchPrimary = window.matchMedia('(hover: none) and (pointer: coarse)').matches
-  || ('ontouchstart' in window);
 
 /** Active pointers: id -> { x, y, sx, sy, type, role } */
 const pointers = new Map();
 let pinchState = null; // { dist, midX, midY, zoom }
 let toolPointerId = null; // finger/mouse firing continuous tools
 let panPointerId = null; // single-finger middle / alt pan
+let panAccum = 0; // drag distance before committing empty-space pan
 
 function resize() {
   const wrap = document.getElementById('stage-wrap');
+  if (!wrap) return;
   const rect = wrap.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2); // cap DPR on iPad for perf
-  canvas.width = Math.floor(rect.width * dpr);
-  canvas.height = Math.floor(rect.height * dpr);
-  canvas.style.width = `${rect.width}px`;
-  canvas.style.height = `${rect.height}px`;
+  // Prefer visualViewport height on iOS Safari (address bar shows/hides)
+  const vv = window.visualViewport;
+  let w = rect.width;
+  let h = rect.height;
+  if (vv && isTouchPrimary) {
+    // stage-wrap already accounts for chrome; just don't trust 0 sizes
+    w = Math.max(w, 1);
+    h = Math.max(h, 1);
+  }
+  const dpr = Math.min(window.devicePixelRatio || 1, isTouchPrimary ? 1.75 : 2);
+  canvas.width = Math.floor(w * dpr);
+  canvas.height = Math.floor(h * dpr);
+  canvas.style.width = `${w}px`;
+  canvas.style.height = `${h}px`;
   ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.W = rect.width;
-  ctx.H = rect.height;
+  ctx.W = w;
+  ctx.H = h;
   document.documentElement.classList.toggle('touch-ui', isTouchPrimary);
-  // After layout settles, keep the arena framed (not empty sky)
   if (!playing) focusSpawnCam(false);
   else clampCam();
 }
 window.addEventListener('resize', resize);
-window.addEventListener('orientationchange', () => setTimeout(resize, 120));
+window.addEventListener('orientationchange', () => {
+  setTimeout(() => {
+    resize();
+    if (playing) focusSpawnCam(false);
+  }, 200);
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => resize());
+}
+// Class early so CSS compact layout applies before first paint measure
+document.documentElement.classList.toggle('touch-ui', isTouchPrimary);
 resize();
 
 function canvasPos(e) {
@@ -511,18 +536,23 @@ function clampCam() {
   ctx.cam.y = Math.max(Math.min(minY, maxY), Math.min(Math.max(minY, maxY), ctx.cam.y));
 }
 
-/** Put the spawn strip + floor in the middle of the screen. */
+/** Put the spawn strip + floor on screen (touch: floor lower third so chrome doesn't clip people). */
 function focusSpawnCam(resetZoom = false) {
   if (resetZoom) ctx.zoom = ZOOM_DEFAULT;
+  // On short iPad landscape stages, zoom out a bit more so people aren't huge
+  if (isTouchPrimary && (ctx.H || 600) < 420) {
+    ctx.zoom = Math.min(ctx.zoom, 0.78);
+  }
   const z = ctx.zoom || ZOOM_DEFAULT;
   const viewW = Math.max(100, (ctx.W || 900) / z);
   const viewH = Math.max(100, (ctx.H || 600) / z);
   const floorY = ctx.floorY || WORLD_H - 48;
-  // Spawn cluster ~ x=450–1400, people standing on the floor
   const focusX = 780;
-  const focusY = floorY - 130;
+  const focusY = floorY - 110;
+  // Touch: bias floor toward bottom ~28% up from bottom of view
+  const yFrac = isTouchPrimary ? 0.62 : 0.55;
   ctx.cam.x = focusX - viewW * 0.4;
-  ctx.cam.y = focusY - viewH * 0.55;
+  ctx.cam.y = focusY - viewH * yFrac;
   clampCam();
 }
 
@@ -562,25 +592,32 @@ function twoFingerMetrics() {
 
 function beginToolAt(id, sx, sy, button) {
   const w = updateAimFromScreen(sx, sy);
-  // Right mouse / long-press handled separately: grab
+  // Right mouse = grab
   if (button === 2) {
     ctx.grab.start(w.x, w.y, id);
     return;
   }
   // Touch or left: hand tool grabs; other tools fire
   if (TOOLS[toolIndex].id === 'hand') {
-    // Tap empty = nothing; on body = grab. If miss, two-finger will pan.
-    if (!ctx.grab.start(w.x, w.y, id) && isTouchPrimary) {
-      // single-finger drag on empty ground = pan
-      panPointerId = id;
-      pointers.get(id).role = 'pan';
-      pointers.get(id).lastX = sx;
-      pointers.get(id).lastY = sy;
+    if (ctx.grab.start(w.x, w.y, id)) {
+      const rec = pointers.get(id);
+      if (rec) rec.role = 'grab';
+    } else if (isTouchPrimary) {
+      // Empty space — wait for a small drag before panning (avoids accidental camera jumps)
+      const rec = pointers.get(id);
+      if (rec) {
+        rec.role = 'pan-pending';
+        rec.lastX = sx;
+        rec.lastY = sy;
+        panAccum = 0;
+      }
     }
   } else {
     toolPointerId = id;
     leftDown = true;
     ctx.pointer.down = true;
+    const rec = pointers.get(id);
+    if (rec) rec.role = 'tool';
     ctx.tools.use(TOOLS[toolIndex].id, true, true);
   }
 }
@@ -628,27 +665,34 @@ canvas.addEventListener('pointerdown', (e) => {
     return;
   }
 
-  // Two+ fingers: enter pinch/pan gesture (cancel one-finger tool fire)
+  // Two+ fingers: pure camera on touch (pinch + pan). Grab-while-pinch was confusing on iPad.
   if (pointers.size >= 2) {
     if (toolPointerId != null) {
       leftDown = false;
       ctx.pointer.down = false;
       toolPointerId = null;
     }
-    // keep grabs for multi-limb control unless pure pinch — if second finger
-    // is not on a body and hand tool, use pinch
+    if (isTouchPrimary) {
+      // Drop grabs so camera owns the gesture cleanly
+      endAllGrabs();
+      const m = twoFingerMetrics();
+      if (m) {
+        pinchState = { dist: Math.max(m.dist, 12), midX: m.midX, midY: m.midY, zoom: ctx.zoom };
+        for (const pt of pointers.values()) pt.role = 'pinch';
+      }
+      return;
+    }
+    // Desktop multi-pointer (rare): allow dual grab
     const m = twoFingerMetrics();
     if (m) {
       pinchState = { dist: m.dist, midX: m.midX, midY: m.midY, zoom: ctx.zoom };
       for (const pt of pointers.values()) pt.role = 'pinch';
     }
-    // Second finger can also grab if on a body (multitouch ragdoll)
     const w = screenToWorld(p.x, p.y);
     const hit = bodyAt(people, w.x, w.y);
     if (hit || TOOLS[toolIndex].id === 'hand') {
       if (ctx.grab.start(w.x, w.y, e.pointerId)) {
         pointers.get(e.pointerId).role = 'grab';
-        // still allow pinch if two grabs? pan/zoom with residual movement
       }
     }
     return;
@@ -680,23 +724,38 @@ canvas.addEventListener('pointermove', (e) => {
     updateAimFromScreen(p.x, p.y);
   }
 
-  // Two-finger pinch + pan
+  // Two-finger pinch + pan (damped zoom so iPad trackpad-ish pinches don't rocket)
   if (pointers.size >= 2 && pinchState) {
     const m = twoFingerMetrics();
-    if (m && m.dist > 8) {
-      // pan by midpoint movement
+    if (m && m.dist > 10) {
       panByScreen(m.midX - pinchState.midX, m.midY - pinchState.midY);
-      // zoom by distance ratio
-      const scale = m.dist / pinchState.dist;
+      const raw = m.dist / Math.max(12, pinchState.dist);
+      // Soften: only apply a fraction of the scale delta per frame
+      const scale = 1 + (raw - 1) * (isTouchPrimary ? 0.55 : 0.85);
       zoomAt(m.midX, m.midY, pinchState.zoom * scale);
       pinchState = { dist: m.dist, midX: m.midX, midY: m.midY, zoom: ctx.zoom };
     }
-    // also move any grabs
-    for (const [id, pt] of pointers) {
-      if (activeGrabs.has(id)) {
-        const ww = screenToWorld(pt.x, pt.y);
-        ctx.grab.move(ww.x, ww.y, id);
+    if (!isTouchPrimary) {
+      for (const [id, pt] of pointers) {
+        if (activeGrabs.has(id)) {
+          const ww = screenToWorld(pt.x, pt.y);
+          ctx.grab.move(ww.x, ww.y, id);
+        }
       }
+    }
+    return;
+  }
+
+  // Pending pan — commit after ~14px drag so taps don't nudge the camera
+  if (rec.role === 'pan-pending') {
+    const dx = p.x - rec.lastX;
+    const dy = p.y - rec.lastY;
+    panAccum += Math.hypot(dx, dy);
+    rec.lastX = p.x;
+    rec.lastY = p.y;
+    if (panAccum > 14) {
+      rec.role = 'pan';
+      panPointerId = e.pointerId;
     }
     return;
   }
@@ -710,7 +769,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
 
   // Grab follow
-  if (activeGrabs.has(e.pointerId)) {
+  if (activeGrabs.has(e.pointerId) || rec.role === 'grab') {
     const w = screenToWorld(p.x, p.y);
     ctx.grab.move(w.x, w.y, e.pointerId);
   }
@@ -997,10 +1056,24 @@ function startPlay() {
   document.getElementById('title-screen')?.classList.add('hidden');
   document.getElementById('app')?.classList.add('playing');
   sfx.unlock();
-  focusSpawnCam(true);
-  spawnCrowd(5);
-  toast("WELCOME TO HENRI'S TORTURE GULAG");
+  // Layout reflow after title hide — remeasure then frame spawn (critical on iPad)
+  requestAnimationFrame(() => {
+    resize();
+    focusSpawnCam(true);
+    spawnCrowd(5);
+    toast(isTouchPrimary
+      ? '1 finger = tool · 2 fingers = pan/zoom'
+      : "WELCOME TO HENRI'S TORTURE GULAG");
+  });
 }
+
+document.getElementById('btn-cam')?.addEventListener('click', (e) => {
+  e.preventDefault();
+  if (!playing) return;
+  sfx.unlock();
+  focusSpawnCam(true);
+  toast('CAMERA RESET');
+});
 
 // boot
 async function boot() {
