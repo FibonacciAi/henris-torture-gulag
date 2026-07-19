@@ -1,6 +1,9 @@
 /** Human ragdoll factory, damage, severing, drawing. */
 
 import { PART_SPRITE, PART_DRAW_SIZE } from './assets.js';
+import { pickKind, pickFrom, getKind, PERSON_KINDS } from './kinds.js';
+
+export { PERSON_KINDS, getKind, pickKind };
 
 const { Bodies, Body, Composite, Constraint, Vector } = Matter;
 
@@ -29,16 +32,22 @@ const COLORS = {
 
 let nextId = 1;
 
-function partOpts(label, personId, group) {
+function partOpts(label, personId, group, kind) {
+  const isFoot = label === 'lowerLegL' || label === 'lowerLegR';
+  const isLeg = label.startsWith('upperLeg') || label.startsWith('lowerLeg');
+  const dMul = kind?.densityMul ?? 1;
+  const rest = kind?.restitution ?? 0.02;
+  const air = kind?.frictionAir ?? 0.035;
   return {
     label,
     personId,
     collisionFilter: { group },
-    friction: 0.4,
-    frictionAir: 0.03,
-    restitution: 0.08,
-    density: label === 'head' ? 0.0014 : label === 'torso' ? 0.0022 : 0.0016,
-    sleepThreshold: 45,
+    friction: isFoot ? 1.2 : isLeg ? 0.7 : 0.45,
+    frictionAir: air,
+    restitution: rest,
+    density: (label === 'head' ? 0.0015 : label === 'torso' ? 0.0024 : isFoot ? 0.002 : 0.0016) * dMul,
+    sleepThreshold: 55,
+    slop: isFoot ? 0.02 : 0.05,
   };
 }
 
@@ -71,27 +80,41 @@ export function ensureCapacity(world, people, stats, need = 1) {
   }
 }
 
-export function createRagdoll(world, x, y, stats, palette) {
+/**
+ * @param {object} [options]
+ * @param {string} [options.kindId]
+ * @param {number} [options.floorY]  if set, place feet on floor (y ignored for height)
+ */
+export function createRagdoll(world, x, y, stats, options = null) {
+  const opts = options && typeof options === 'object' ? options : {};
+  const kind = pickKind(opts.kindId);
   const id = nextId++;
   const group = Body.nextGroup(true);
-  const scale = 0.95 + Math.random() * 0.15;
-  const shirt = palette?.shirt || pick([
-    '#6a6a6a', '#5c5854', '#4a5248', '#7a7268', '#555a50', '#6e6560',
-  ]);
-  const pants = palette?.pants || pick(['#3a3a3a', '#2e2e2e', '#444038', '#353530']);
-  const skin = palette?.skin || pick(['#c9a88a', '#b8956e', '#d4b090', '#a67c52', '#c4a07a']);
+  const scale = kind.scaleMin + Math.random() * (kind.scaleMax - kind.scaleMin);
+  const shirt = opts.shirt || pickFrom(kind.shirt);
+  const pants = opts.pants || pickFrom(kind.pants);
+  const skin = opts.skin || pickFrom(kind.skin);
+  const hpMul = kind.hpMul ?? 1;
 
-  // Larger hitboxes to match upscaled sprites
-  const head = Bodies.circle(x, y - 58 * scale, 14 * scale, partOpts('head', id, group));
-  const torso = Bodies.rectangle(x, y - 10 * scale, 28 * scale, 44 * scale, partOpts('torso', id, group));
-  const upperArmL = Bodies.rectangle(x - 26 * scale, y - 20 * scale, 11 * scale, 28 * scale, partOpts('upperArmL', id, group));
-  const upperArmR = Bodies.rectangle(x + 26 * scale, y - 20 * scale, 11 * scale, 28 * scale, partOpts('upperArmR', id, group));
-  const lowerArmL = Bodies.rectangle(x - 26 * scale, y + 8 * scale, 10 * scale, 26 * scale, partOpts('lowerArmL', id, group));
-  const lowerArmR = Bodies.rectangle(x + 26 * scale, y + 8 * scale, 10 * scale, 26 * scale, partOpts('lowerArmR', id, group));
-  const upperLegL = Bodies.rectangle(x - 10 * scale, y + 34 * scale, 13 * scale, 32 * scale, partOpts('upperLegL', id, group));
-  const upperLegR = Bodies.rectangle(x + 10 * scale, y + 34 * scale, 13 * scale, 32 * scale, partOpts('upperLegR', id, group));
-  const lowerLegL = Bodies.rectangle(x - 10 * scale, y + 64 * scale, 11 * scale, 30 * scale, partOpts('lowerLegL', id, group));
-  const lowerLegR = Bodies.rectangle(x + 10 * scale, y + 64 * scale, 11 * scale, 30 * scale, partOpts('lowerLegR', id, group));
+  // Root y: place feet on floor when floorY given.
+  let rootY = y;
+  if (opts.floorY != null) {
+    rootY = opts.floorY - 80 * scale;
+  }
+  const rootX = x;
+
+  // Alien: oversized head hitbox
+  const headR = (kind.id === 'alien' ? 20 : 14) * scale;
+  const head = Bodies.circle(rootX, rootY - 58 * scale, headR, partOpts('head', id, group, kind));
+  const torso = Bodies.rectangle(rootX, rootY - 10 * scale, 28 * scale, 44 * scale, partOpts('torso', id, group, kind));
+  const upperArmL = Bodies.rectangle(rootX - 26 * scale, rootY - 20 * scale, 11 * scale, 28 * scale, partOpts('upperArmL', id, group, kind));
+  const upperArmR = Bodies.rectangle(rootX + 26 * scale, rootY - 20 * scale, 11 * scale, 28 * scale, partOpts('upperArmR', id, group, kind));
+  const lowerArmL = Bodies.rectangle(rootX - 26 * scale, rootY + 8 * scale, 10 * scale, 26 * scale, partOpts('lowerArmL', id, group, kind));
+  const lowerArmR = Bodies.rectangle(rootX + 26 * scale, rootY + 8 * scale, 10 * scale, 26 * scale, partOpts('lowerArmR', id, group, kind));
+  const upperLegL = Bodies.rectangle(rootX - 10 * scale, rootY + 34 * scale, 13 * scale, 32 * scale, partOpts('upperLegL', id, group, kind));
+  const upperLegR = Bodies.rectangle(rootX + 10 * scale, rootY + 34 * scale, 13 * scale, 32 * scale, partOpts('upperLegR', id, group, kind));
+  const lowerLegL = Bodies.rectangle(rootX - 10 * scale, rootY + 64 * scale, 11 * scale, 30 * scale, partOpts('lowerLegL', id, group, kind));
+  const lowerLegR = Bodies.rectangle(rootX + 10 * scale, rootY + 64 * scale, 11 * scale, 30 * scale, partOpts('lowerLegR', id, group, kind));
 
   const parts = {
     head, torso,
@@ -115,33 +138,42 @@ export function createRagdoll(world, x, y, stats, palette) {
     return c;
   }
 
-  // neck / shoulders / hips / elbows / knees — snappier joints
-  joint(head, torso, 0, 12 * scale, 0, -20 * scale, 2, 0.9, 0.18);
-  joint(torso, upperArmL, -13 * scale, -14 * scale, 0, -12 * scale, 2, 0.72, 0.1);
-  joint(torso, upperArmR, 13 * scale, -14 * scale, 0, -12 * scale, 2, 0.72, 0.1);
-  joint(upperArmL, lowerArmL, 0, 12 * scale, 0, -11 * scale, 1, 0.62, 0.1);
-  joint(upperArmR, lowerArmR, 0, 12 * scale, 0, -11 * scale, 1, 0.62, 0.1);
-  joint(torso, upperLegL, -9 * scale, 20 * scale, 0, -14 * scale, 2, 0.78, 0.12);
-  joint(torso, upperLegR, 9 * scale, 20 * scale, 0, -14 * scale, 2, 0.78, 0.12);
-  joint(upperLegL, lowerLegL, 0, 14 * scale, 0, -13 * scale, 1, 0.62, 0.1);
-  joint(upperLegR, lowerLegR, 0, 14 * scale, 0, -13 * scale, 1, 0.62, 0.1);
+  joint(head, torso, 0, 12 * scale, 0, -20 * scale, 2, 0.92, 0.22);
+  joint(torso, upperArmL, -13 * scale, -14 * scale, 0, -12 * scale, 2, 0.75, 0.12);
+  joint(torso, upperArmR, 13 * scale, -14 * scale, 0, -12 * scale, 2, 0.75, 0.12);
+  joint(upperArmL, lowerArmL, 0, 12 * scale, 0, -11 * scale, 1, 0.65, 0.12);
+  joint(upperArmR, lowerArmR, 0, 12 * scale, 0, -11 * scale, 1, 0.65, 0.12);
+  joint(torso, upperLegL, -9 * scale, 20 * scale, 0, -14 * scale, 2, 0.88, 0.18);
+  joint(torso, upperLegR, 9 * scale, 20 * scale, 0, -14 * scale, 2, 0.88, 0.18);
+  joint(upperLegL, lowerLegL, 0, 14 * scale, 0, -13 * scale, 1, 0.82, 0.16);
+  joint(upperLegR, lowerLegR, 0, 14 * scale, 0, -13 * scale, 1, 0.82, 0.16);
 
-  // soft posture stabilizers (break on death)
   const stabilizers = [
-    joint(head, torso, -7 * scale, 4 * scale, -10 * scale, -12 * scale, 16, 0.06, 0.03),
-    joint(head, torso, 7 * scale, 4 * scale, 10 * scale, -12 * scale, 16, 0.06, 0.03),
+    joint(head, torso, -7 * scale, 4 * scale, -10 * scale, -12 * scale, 14, 0.12, 0.06),
+    joint(head, torso, 7 * scale, 4 * scale, 10 * scale, -12 * scale, 14, 0.12, 0.06),
+    joint(upperLegL, upperLegR, 0, 0, 0, 0, 22, 0.08, 0.05),
+    joint(torso, lowerLegL, -10 * scale, 22 * scale, 0, 0, 52, 0.05, 0.04),
+    joint(torso, lowerLegR, 10 * scale, 22 * scale, 0, 0, 52, 0.05, 0.04),
   ];
 
   const hp = {};
-  for (const k of Object.keys(parts)) hp[k] = PART_HP[k];
+  const maxHp = {};
+  for (const k of Object.keys(parts)) {
+    maxHp[k] = Math.round(PART_HP[k] * hpMul);
+    hp[k] = maxHp[k];
+  }
 
   const person = {
     id,
+    kindId: kind.id,
+    kind,
+    kindName: kind.name,
+    kindEmoji: kind.emoji,
     parts,
     joints,
     stabilizers,
     hp,
-    maxHp: { ...PART_HP },
+    maxHp,
     alive: true,
     deadAt: 0,
     bornAt: performance.now(),
@@ -149,26 +181,165 @@ export function createRagdoll(world, x, y, stats, palette) {
     shirt,
     pants,
     scale,
+    blood: kind.blood || '#8a1020',
+    noBlood: !!kind.noBlood,
+    floaty: !!kind.floaty,
+    heavy: !!kind.heavy,
+    tint: kind.tint || null,
+    tintAlpha: kind.tintAlpha ?? 0,
+    accessory: kind.accessory || null,
     severed: new Set(),
     onFire: 0,
     bleeds: [],
     _removed: false,
+    mode: 'stand',
+    stunT: 0,
+    balance: 1,
   };
 
   for (const b of Object.values(parts)) {
     b.plugin = { person, part: b.label };
+    Body.setAngle(b, 0);
+    Body.setAngularVelocity(b, 0);
+    Body.setVelocity(b, { x: 0, y: 0 });
     Composite.add(world, b);
   }
   for (const j of joints) Composite.add(world, j);
 
-  // Park them still — no deploy slam
-  for (const b of Object.values(parts)) {
-    Body.setVelocity(b, { x: 0, y: 0 });
-    Body.setAngularVelocity(b, 0);
-  }
-
   stats.people += 1;
   return person;
+}
+
+/** Knock them out of stand mode (yeet, heavy hit, explosion). */
+export function stunPerson(person, seconds = 1.4) {
+  if (!person || !person.alive) return;
+  person.stunT = Math.max(person.stunT || 0, seconds);
+  person.mode = 'ragdoll';
+}
+
+const STAND_ANGLES = {
+  torso: 0,
+  head: 0,
+  upperArmL: 0.12,
+  upperArmR: -0.12,
+  lowerArmL: 0.08,
+  lowerArmR: -0.08,
+  upperLegL: 0.04,
+  upperLegR: -0.04,
+  lowerLegL: 0,
+  lowerLegR: 0,
+};
+
+function normAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+/**
+ * Active posture — living inmates try to stand when feet find the floor.
+ * Grab / stun / high speed → full ragdoll. Death → limp forever.
+ */
+function applyStanding(person, dt, ctx) {
+  if (!person.alive || person._removed) return;
+
+  const torso = person.parts.torso;
+  if (!torso) return;
+
+  const floorY = ctx.floorY ?? 900;
+  const grabbed = ctx.isPersonGrabbed?.(person);
+  const spd = Math.hypot(torso.velocity.x, torso.velocity.y);
+
+  if (person.stunT > 0) person.stunT -= dt;
+
+  // External disruption
+  if (grabbed) {
+    person.mode = 'ragdoll';
+    person.stunT = Math.max(person.stunT, 0.35);
+    return;
+  }
+  if (person.stunT > 0 || spd > 16) {
+    person.mode = 'ragdoll';
+    // Still damp extreme spin so they don't blender forever
+    if (spd > 16) {
+      for (const b of Object.values(person.parts)) {
+        if (b) Body.setAngularVelocity(b, b.angularVelocity * 0.97);
+      }
+    }
+    return;
+  }
+
+  const footL = person.parts.lowerLegL;
+  const footR = person.parts.lowerLegR;
+  const feet = [footL, footR].filter((f) => f && !person.severed.has(f.label));
+  let feetDown = 0;
+  for (const f of feet) {
+    if (f.position.y > floorY - 38) feetDown += 1;
+  }
+
+  // In air — gentle upright torque only
+  if (feetDown === 0 && torso.position.y < floorY - 130) {
+    person.mode = 'air';
+    const err = normAngle(torso.angle);
+    Body.setAngularVelocity(torso, torso.angularVelocity * 0.96 - err * 0.04);
+    return;
+  }
+
+  person.mode = 'stand';
+
+  // Angular springs toward standing rest pose
+  for (const [name, target] of Object.entries(STAND_ANGLES)) {
+    if (person.severed.has(name)) continue;
+    const b = person.parts[name];
+    if (!b) continue;
+    const err = normAngle(b.angle - target);
+    const strength = name === 'torso' || name === 'head' ? 0.18
+      : name.startsWith('upperLeg') || name.startsWith('lowerLeg') ? 0.15
+        : 0.07;
+    Body.setAngularVelocity(b, b.angularVelocity * 0.82 - err * strength);
+  }
+
+  // Balance: COM over mid-feet
+  if (feet.length) {
+    const midX = feet.reduce((s, f) => s + f.position.x, 0) / feet.length;
+    const lean = torso.position.x - midX;
+    Body.applyForce(torso, torso.position, { x: -lean * 0.00008, y: 0 });
+
+    // Keep hips up so they don't crumple into a pile
+    const standHipY = floorY - 92 * person.scale;
+    if (torso.position.y > standHipY) {
+      const lift = Math.min(0.0065, (torso.position.y - standHipY) * 0.00012);
+      Body.applyForce(torso, torso.position, { x: 0, y: -lift });
+    }
+
+    // Foot plant — kill downward + skid when on ground
+    for (const f of feet) {
+      if (f.position.y > floorY - 34) {
+        Body.setVelocity(f, {
+          x: f.velocity.x * 0.5,
+          y: Math.min(f.velocity.y, 0) * 0.15,
+        });
+        // Nudge feet to floor contact so they "stand" instead of hover-sink
+        const halfH = Math.max(6, (f.bounds.max.y - f.bounds.min.y) * 0.45);
+        const targetY = floorY - halfH - 1;
+        if (f.position.y > targetY - 6) {
+          Body.setPosition(f, { x: f.position.x, y: Math.min(f.position.y, targetY) });
+        }
+      }
+    }
+  }
+
+  // Standing friction — less ice-skating
+  Body.setVelocity(torso, {
+    x: torso.velocity.x * 0.86,
+    y: torso.velocity.y * (torso.velocity.y > 0 ? 0.9 : 1),
+  });
+  if (person.parts.head) {
+    Body.setVelocity(person.parts.head, {
+      x: person.parts.head.velocity.x * 0.9,
+      y: person.parts.head.velocity.y,
+    });
+  }
 }
 
 function pick(arr) { return arr[(Math.random() * arr.length) | 0]; }
@@ -188,11 +359,22 @@ export function damagePart(person, partName, amount, point, ctx) {
     const mul = ctx.comboMul?.() || 1;
     const load = ctx.people?.length || 0;
     const fxScale = load > 18 ? 0.35 : load > 12 ? 0.6 : 1;
-    ctx.fx.blood(point.x, point.y, Math.min(28, 6 + dealt * 0.4) * fxScale, 130 + amount * 4);
+    if (person.noBlood) {
+      ctx.fx.sparks(point.x, point.y, Math.ceil((8 + dealt * 0.3) * fxScale));
+    } else {
+      ctx.fx.blood(
+        point.x, point.y,
+        Math.min(28, 6 + dealt * 0.4) * fxScale,
+        130 + amount * 4,
+        person.blood || null
+      );
+    }
     if (amount > 16 && fxScale > 0.4) ctx.fx.sparks(point.x, point.y, Math.ceil(5 * fxScale));
-    if (amount > 28 && fxScale > 0.5) ctx.fx.gib(point.x, point.y, Math.ceil(3 * fxScale));
+    if (amount > 28 && fxScale > 0.5 && !person.noBlood) ctx.fx.gib(point.x, point.y, Math.ceil(3 * fxScale));
     ctx.stats.chaos += Math.round(dealt * mul);
     ctx.registerHit?.(dealt, point);
+    // Big hits knock them off their feet
+    if (amount > 10) stunPerson(person, 0.6 + Math.min(1.5, amount * 0.03));
     const body = person.parts[partName];
     if (body && amount > 8 && load < 20) {
       Body.applyForce(body, body.position, {
@@ -203,7 +385,7 @@ export function damagePart(person, partName, amount, point, ctx) {
   }
 
   // bleed emitter
-  if (person.hp[partName] < person.maxHp[partName] * 0.5 && Math.random() < 0.4) {
+  if (!person.noBlood && person.hp[partName] < person.maxHp[partName] * 0.5 && Math.random() < 0.4) {
     const body = person.parts[partName];
     if (body) person.bleeds.push({ part: partName, t: 1.2 + Math.random() });
   }
@@ -278,6 +460,8 @@ export function killPerson(person, ctx, point) {
   if (!person.alive) return;
   person.alive = false;
   person.deadAt = performance.now();
+  person.mode = 'ragdoll';
+  person.stunT = 0;
   person.hp.head = Math.min(person.hp.head, 0);
   // Sleep corpses faster — less solver work
   for (const b of Object.values(person.parts)) {
@@ -297,10 +481,14 @@ export function killPerson(person, ctx, point) {
   person.stabilizers = [];
   const p = point || person.parts.torso?.position || person.parts.head?.position;
   if (p) {
-    ctx.fx.blood(p.x, p.y, 42, 320);
-    ctx.fx.gib(p.x, p.y, 12);
+    if (person.noBlood) ctx.fx.sparks(p.x, p.y, 24);
+    else {
+      ctx.fx.blood(p.x, p.y, 42, 320, person.blood || null);
+      ctx.fx.gib(p.x, p.y, 12);
+    }
     ctx.fx.smoke(p.x, p.y, 6);
-    ctx.fx.floatText(p.x, p.y - 36, 'KIA', '#ff3d5a', 1.35);
+    const tag = person.kindEmoji ? `${person.kindEmoji} KIA` : 'KIA';
+    ctx.fx.floatText(p.x, p.y - 36, tag, person.kind?.labelColor || '#ff3d5a', 1.35);
     ctx.fx.flash(p.x, p.y, 90, 'rgba(255,60,90,0.4)', 0.2);
   }
   ctx.sfx.death();
@@ -309,7 +497,7 @@ export function killPerson(person, ctx, point) {
   ctx.stats.chaos += Math.round(120 * mul);
   ctx.registerKill?.(p);
   ctx.triggerSlowMo?.(0.28, 0.7);
-  ctx.toast?.('INMATE TERMINATED');
+  ctx.toast?.(`${person.kindEmoji || ''} ${person.kindName || 'INMATE'} DOWN`.trim());
 }
 
 /**
@@ -373,6 +561,18 @@ export function updatePeople(people, dt, ctx) {
   for (const person of people) {
     if (person._removed) continue;
 
+    // Standing / balance (cheap; always)
+    applyStanding(person, dt, ctx);
+
+    // Balloon / alien float drift
+    if (person.alive && person.floaty && person.parts.torso) {
+      const t = person.parts.torso;
+      Body.applyForce(t, t.position, {
+        x: Math.sin((person.id + performance.now() * 0.001) * 1.7) * 0.00015,
+        y: -0.00055 * (person.kindId === 'balloon' ? 1.2 : 0.7),
+      });
+    }
+
     // fire DoT
     if (person.onFire > 0) {
       person.onFire -= dt;
@@ -382,6 +582,7 @@ export function updatePeople(people, dt, ctx) {
           ctx.fx.fire(torso.position.x + (Math.random() - 0.5) * 16, torso.position.y + (Math.random() - 0.5) * 20, heavy ? 2 : 4);
         }
         damagePart(person, pick(Object.keys(person.parts)), 3 + Math.random() * 4, torso.position, ctx);
+        stunPerson(person, 0.8);
       }
     }
 
@@ -405,6 +606,36 @@ export function updatePeople(people, dt, ctx) {
 
     // Cap bleed list
     if (person.bleeds.length > 4) person.bleeds.length = 4;
+  }
+}
+
+/**
+ * Hard stop floor tunneling after big flings.
+ * Caps speed + clamps any limb that sank through the floor slab.
+ */
+export function preventFloorTunnel(people, floorY, maxSpeed = 42) {
+  for (const person of people) {
+    if (person._removed) continue;
+    for (const b of Object.values(person.parts)) {
+      if (!b) continue;
+      const vx = b.velocity.x;
+      const vy = b.velocity.y;
+      const spd = Math.hypot(vx, vy);
+      if (spd > maxSpeed) {
+        const s = maxSpeed / spd;
+        Body.setVelocity(b, { x: vx * s, y: vy * s });
+      }
+      // Approximate body half-height from bounds
+      const halfH = Math.max(6, (b.bounds.max.y - b.bounds.min.y) * 0.45);
+      const maxY = floorY - halfH - 1;
+      if (b.position.y > maxY) {
+        Body.setPosition(b, { x: b.position.x, y: maxY });
+        if (b.velocity.y > 0) {
+          Body.setVelocity(b, { x: b.velocity.x * 0.45, y: 0 });
+        }
+        Body.setAngularVelocity(b, b.angularVelocity * 0.5);
+      }
+    }
   }
 }
 
@@ -469,9 +700,15 @@ function drawPart(ctx, person, name, body, cam, simple = false) {
   const severed = person.severed.has(name);
   const flip = name.endsWith('L');
 
+  // Alien head / goblin scale tweaks on draw
+  let sizeMul = 1.22;
+  if (name === 'head' && person.kindId === 'alien') sizeMul = 1.55;
+  if (person.kindId === 'bruiser') sizeMul = 1.28;
+  if (person.kindId === 'goblin') sizeMul = 1.15;
+
   const [pw, ph] = PART_DRAW_SIZE[name] || [16, 24];
-  const sw = pw * person.scale * 1.22;
-  const sh = ph * person.scale * 1.22;
+  const sw = pw * person.scale * sizeMul;
+  const sh = ph * person.scale * sizeMul;
 
   let spriteKey = PART_SPRITE[name];
   if (name === 'head' && dead) spriteKey = 'headDead';
@@ -482,28 +719,47 @@ function drawPart(ctx, person, name, body, cam, simple = false) {
   ctx.rotate(ang);
   if (flip) ctx.scale(-1, 1);
 
+  // Super cape behind torso
+  if (!simple && name === 'torso' && person.accessory === 'cape' && person.alive) {
+    ctx.fillStyle = person.shirt || '#2040ff';
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    ctx.moveTo(-sw * 0.35, -sh * 0.2);
+    ctx.quadraticCurveTo(-sw * 0.9, sh * 0.4, -sw * 0.5, sh * 0.95);
+    ctx.lineTo(sw * 0.15, sh * 0.3);
+    ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
   if (sprite) {
-    ctx.drawImage(sprite, -sw / 2, -sh / 2, sw, sh);
+    // Tint ONLY the sprite pixels (offscreen) — never fillRect on the main canvas
+    // (source-atop against the stage painted solid color boxes over the background).
+    if (!simple && person.tint && person.tintAlpha > 0.02) {
+      drawTintedSprite(ctx, sprite, -sw / 2, -sh / 2, sw, sh, person.tint, person.tintAlpha);
+    } else {
+      ctx.drawImage(sprite, -sw / 2, -sh / 2, sw, sh);
+    }
 
     if (!simple) {
+      // Soft clothing wash — clipped to sprite alpha via destination-in style path:
+      // draw color then keep only where sprite was (using multiply is too harsh on bg).
       if ((name === 'torso' || name.startsWith('upperArm')) && person.shirt) {
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.globalAlpha = 0.22;
-        ctx.fillStyle = person.shirt;
-        ctx.fillRect(-sw / 2, -sh / 2, sw, sh);
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = 1;
+        softSpriteWash(ctx, sprite, -sw / 2, -sh / 2, sw, sh, person.shirt, person.kindId === 'inmate' ? 0.2 : 0.32);
       }
-      if (hpPct < 0.65) {
+      if ((name.startsWith('upperLeg') || name.startsWith('lowerLeg')) && person.pants) {
+        softSpriteWash(ctx, sprite, -sw / 2, -sh / 2, sw, sh, person.pants, 0.26);
+      }
+      if (hpPct < 0.65 && !person.noBlood) {
         ctx.globalAlpha = (1 - hpPct) * 0.55;
-        ctx.fillStyle = '#8a1020';
+        ctx.fillStyle = person.blood || '#8a1020';
         ctx.beginPath();
         ctx.ellipse(sw * 0.1, 0, sw * 0.22, sh * 0.18, 0.2, 0, Math.PI * 2);
         ctx.fill();
         ctx.globalAlpha = 1;
       }
       if (severed) {
-        ctx.strokeStyle = '#f0e6d0';
+        ctx.strokeStyle = person.noBlood ? '#88ccff' : '#f0e6d0';
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.moveTo(-sw / 2, -sh / 2 + 2);
@@ -512,13 +768,12 @@ function drawPart(ctx, person, name, body, cam, simple = false) {
       }
     }
   } else {
-    // procedural fallback
     let fill = person.skin;
     if (name === 'torso') fill = dead ? COLORS.dead : person.shirt;
     else if (name.startsWith('upperLeg') || name.startsWith('lowerLeg')) fill = dead ? '#3a3f4a' : person.pants;
-    if (hpPct < 0.45) fill = mixHex(fill, '#7a0a1c', 1 - hpPct);
+    if (hpPct < 0.45 && !person.noBlood) fill = mixHex(fill, person.blood || '#7a0a1c', 1 - hpPct);
     if (name === 'head') {
-      const r = 11 * person.scale;
+      const r = 11 * person.scale * (person.kindId === 'alien' ? 1.4 : 1);
       ctx.fillStyle = fill;
       ctx.beginPath();
       ctx.arc(0, 0, r, 0, Math.PI * 2);
@@ -528,6 +783,11 @@ function drawPart(ctx, person, name, body, cam, simple = false) {
       ctx.fillStyle = fill;
       ctx.fill();
     }
+  }
+
+  // Accessories on head
+  if (!simple && name === 'head' && person.alive) {
+    drawAccessory(ctx, person, sw, sh);
   }
 
   if (!simple && person.onFire > 0 && (name === 'torso' || name === 'head')) {
@@ -540,6 +800,174 @@ function drawPart(ctx, person, name, body, cam, simple = false) {
   }
 
   ctx.restore();
+}
+
+/** Offscreen cache so we never tint the stage background. */
+const _tintCanvas = typeof document !== 'undefined' ? document.createElement('canvas') : null;
+const _tintCtx = _tintCanvas ? _tintCanvas.getContext('2d') : null;
+
+function drawTintedSprite(ctx, sprite, x, y, w, h, color, alpha) {
+  if (!_tintCtx || !sprite) {
+    ctx.drawImage(sprite, x, y, w, h);
+    return;
+  }
+  const tw = Math.max(1, Math.ceil(w));
+  const th = Math.max(1, Math.ceil(h));
+  if (_tintCanvas.width < tw || _tintCanvas.height < th) {
+    _tintCanvas.width = tw;
+    _tintCanvas.height = th;
+  }
+  const o = _tintCtx;
+  o.clearRect(0, 0, tw, th);
+  o.globalCompositeOperation = 'source-over';
+  o.globalAlpha = 1;
+  o.drawImage(sprite, 0, 0, tw, th);
+  o.globalCompositeOperation = 'source-atop';
+  o.globalAlpha = Math.min(1, alpha);
+  o.fillStyle = color;
+  o.fillRect(0, 0, tw, th);
+  o.globalCompositeOperation = 'source-over';
+  o.globalAlpha = 1;
+  ctx.drawImage(_tintCanvas, 0, 0, tw, th, x, y, w, h);
+}
+
+function softSpriteWash(ctx, sprite, x, y, w, h, color, alpha) {
+  if (!_tintCtx || !sprite || alpha <= 0) return;
+  const tw = Math.max(1, Math.ceil(w));
+  const th = Math.max(1, Math.ceil(h));
+  if (_tintCanvas.width < tw || _tintCanvas.height < th) {
+    _tintCanvas.width = tw;
+    _tintCanvas.height = th;
+  }
+  const o = _tintCtx;
+  o.clearRect(0, 0, tw, th);
+  o.globalCompositeOperation = 'source-over';
+  o.globalAlpha = 1;
+  o.drawImage(sprite, 0, 0, tw, th);
+  o.globalCompositeOperation = 'source-in';
+  o.globalAlpha = Math.min(1, alpha);
+  o.fillStyle = color;
+  o.fillRect(0, 0, tw, th);
+  o.globalCompositeOperation = 'source-over';
+  o.globalAlpha = 1;
+  ctx.globalAlpha = 1;
+  ctx.drawImage(_tintCanvas, 0, 0, tw, th, x, y, w, h);
+}
+
+function drawAccessory(ctx, person, sw, sh) {
+  const a = person.accessory;
+  if (!a) return;
+  const s = person.scale;
+
+  if (a === 'horns') {
+    ctx.fillStyle = '#2a4010';
+    ctx.beginPath();
+    ctx.moveTo(-sw * 0.25, -sh * 0.35);
+    ctx.lineTo(-sw * 0.45, -sh * 0.85);
+    ctx.lineTo(-sw * 0.05, -sh * 0.4);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(sw * 0.25, -sh * 0.35);
+    ctx.lineTo(sw * 0.45, -sh * 0.85);
+    ctx.lineTo(sw * 0.05, -sh * 0.4);
+    ctx.fill();
+  } else if (a === 'antenna') {
+    ctx.strokeStyle = '#88aacc';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -sh * 0.45);
+    ctx.lineTo(0, -sh * 0.95);
+    ctx.stroke();
+    ctx.fillStyle = '#44eeff';
+    ctx.beginPath();
+    ctx.arc(0, -sh * 0.98, 4 * s, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (a === 'hat') {
+    ctx.fillStyle = '#3a1070';
+    ctx.beginPath();
+    ctx.moveTo(-sw * 0.55, -sh * 0.15);
+    ctx.lineTo(0, -sh * 1.15);
+    ctx.lineTo(sw * 0.55, -sh * 0.15);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#c9a227';
+    ctx.fillRect(-sw * 0.08, -sh * 1.15, sw * 0.16, sh * 0.12);
+  } else if (a === 'helmet') {
+    ctx.fillStyle = '#8a9098';
+    ctx.beginPath();
+    ctx.ellipse(0, -sh * 0.15, sw * 0.48, sh * 0.42, 0, Math.PI, 0);
+    ctx.fill();
+    ctx.fillStyle = '#c0c8d0';
+    ctx.fillRect(-sw * 0.5, -sh * 0.2, sw, sh * 0.12);
+  } else if (a === 'clown') {
+    ctx.fillStyle = '#ff2244';
+    ctx.beginPath();
+    ctx.arc(0, sh * 0.08, 5 * s, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#2244ff';
+    ctx.beginPath();
+    ctx.arc(-sw * 0.22, -sh * 0.05, 4 * s, 0, Math.PI * 2);
+    ctx.arc(sw * 0.22, -sh * 0.05, 4 * s, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (a === 'beak') {
+    ctx.fillStyle = '#ff9040';
+    ctx.beginPath();
+    ctx.moveTo(-2, sh * 0.1);
+    ctx.lineTo(sw * 0.55, sh * 0.15);
+    ctx.lineTo(-2, sh * 0.28);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#ff4040';
+    ctx.beginPath();
+    ctx.moveTo(-sw * 0.1, -sh * 0.55);
+    ctx.lineTo(0, -sh * 0.95);
+    ctx.lineTo(sw * 0.1, -sh * 0.55);
+    ctx.fill();
+  } else if (a === 'mask') {
+    ctx.fillStyle = '#0a0a0a';
+    ctx.fillRect(-sw * 0.4, -sh * 0.15, sw * 0.8, sh * 0.28);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(-sw * 0.48, -sh * 0.35, sw * 0.96, sh * 0.12);
+  } else if (a === 'brow') {
+    ctx.strokeStyle = '#2a1810';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-sw * 0.3, -sh * 0.15);
+    ctx.lineTo(-sw * 0.05, -sh * 0.22);
+    ctx.moveTo(sw * 0.3, -sh * 0.15);
+    ctx.lineTo(sw * 0.05, -sh * 0.22);
+    ctx.stroke();
+  } else if (a === 'scar') {
+    ctx.strokeStyle = '#3a5020';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sw * 0.1, -sh * 0.2);
+    ctx.lineTo(sw * 0.28, sh * 0.15);
+    ctx.stroke();
+  } else if (a === 'smile') {
+    ctx.strokeStyle = '#aa6600';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, sh * 0.1, 6 * s, 0.15, Math.PI - 0.15);
+    ctx.stroke();
+  } else if (a === 'balloon') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, -sh * 0.5);
+    ctx.lineTo(sw * 0.4, -sh * 1.2);
+    ctx.stroke();
+    ctx.fillStyle = person.shirt || '#ff70a0';
+    ctx.beginPath();
+    ctx.ellipse(sw * 0.4, -sh * 1.35, 8 * s, 10 * s, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else if (a === 'skull') {
+    ctx.fillStyle = 'rgba(255,255,255,0.35)';
+    ctx.beginPath();
+    ctx.arc(-sw * 0.15, 0, 3 * s, 0, Math.PI * 2);
+    ctx.arc(sw * 0.15, 0, 3 * s, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function roundRect(ctx, x, y, w, h, r) {

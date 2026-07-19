@@ -46,8 +46,83 @@ html.touch-ui .hint.touch-only {
 #app {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto auto 1fr auto;
 }
+
+/* ── Map picker ── */
+#map-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: linear-gradient(180deg, #1c1814, #14110e);
+  border-bottom: 1px solid #2e2820;
+  z-index: 18;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.map-current {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--accent-2);
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding-right: 8px;
+  border-right: 1px solid #332c24;
+}
+
+.map-row {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  flex: 1;
+  padding: 2px 0;
+}
+
+.map-btn {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #3a342c;
+  background: linear-gradient(180deg, #2a2420, #1a1612);
+  color: var(--text);
+  font: 600 10px "IBM Plex Sans", sans-serif;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 7px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: 0.12s ease;
+  white-space: nowrap;
+}
+
+.map-btn:hover {
+  border-color: var(--accent-2);
+  color: #fff;
+}
+
+.map-btn.active {
+  border-color: var(--accent-2);
+  background: linear-gradient(180deg, #3a3020, #241c10);
+  box-shadow: 0 0 0 1px rgba(201, 162, 39, 0.35);
+  color: #ffe9a0;
+}
+
+.map-emoji { font-size: 14px; line-height: 1; }
+.map-name { font-size: 9px; opacity: 0.92; }
+
+html.touch-ui .map-btn {
+  padding: 10px 12px;
+  min-height: 40px;
+}
+html.touch-ui .map-name { font-size: 10px; }
 
 #topbar {
   display: flex;

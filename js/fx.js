@@ -61,23 +61,26 @@ export function createFx() {
     }
   }
 
-  function blood(x, y, n = 18, speed = 220) {
+  function blood(x, y, n = 18, speed = 220, color = null) {
     n = q(n);
     if (n <= 0) {
-      if (Math.random() < 0.4) decal(x, y + 6, 8);
+      if (Math.random() < 0.4) decal(x, y + 6, 8, color);
       return;
     }
-    burst(x, y, '#c4122f', n, speed, 0.85, { r0: 2, r1: 5 });
+    const c0 = color || '#c4122f';
+    const c1 = color || '#7a0a1c';
+    const c2 = color || '#ff2d55';
+    burst(x, y, c0, n, speed, 0.85, { r0: 2, r1: 5 });
     if (quality > 0.5) {
-      burst(x, y, '#7a0a1c', Math.floor(n * 0.4), speed * 0.65, 1.0, { r0: 1.5, r1: 4 });
+      burst(x, y, c1, Math.floor(n * 0.4), speed * 0.65, 1.0, { r0: 1.5, r1: 4 });
     }
     if (quality > 0.7) {
-      burst(x, y, '#ff2d55', Math.floor(n * 0.15), speed * 1.1, 0.35, { r0: 1, r1: 2, g: 200 });
+      burst(x, y, c2, Math.floor(n * 0.15), speed * 1.1, 0.35, { r0: 1, r1: 2, g: 200 });
     }
-    if (Math.random() < 0.5 * quality + 0.2) decal(x, y + 8 + Math.random() * 12, 10 + Math.random() * 18);
+    if (Math.random() < 0.5 * quality + 0.2) decal(x, y + 8 + Math.random() * 12, 10 + Math.random() * 18, color);
   }
 
-  function decal(x, y, r = 16) {
+  function decal(x, y, r = 16, color = null) {
     if (decals.length >= maxDecals) decals.shift();
     decals.push({
       x: x + (Math.random() - 0.5) * 10,
@@ -85,6 +88,7 @@ export function createFx() {
       r,
       rot: Math.random() * Math.PI * 2,
       a: 0.3 + Math.random() * 0.3,
+      color: color || null,
     });
   }
 
@@ -222,7 +226,7 @@ export function createFx() {
       const y = d.y - cam.y;
       if (viewW && (x < -m || x > viewW + m || y < -m || y > viewH + m)) continue;
       ctx.globalAlpha = d.a;
-      ctx.fillStyle = '#5a0818';
+      ctx.fillStyle = d.color || '#5a0818';
       ctx.beginPath();
       ctx.ellipse(x, y, d.r, d.r * 0.45, d.rot, 0, Math.PI * 2);
       ctx.fill();

@@ -53,17 +53,19 @@ export function createToolSystem(ctx) {
       case 'shotgun':
         if (justPressed) {
           ctx.sfx.shotgun();
-          for (let i = 0; i < 8; i++) {
-            const spread = (Math.random() - 0.5) * 0.45;
-            fireBullet(m, 1, 14, 16 + Math.random() * 6, 10, spread);
+          for (let i = 0; i < 14; i++) {
+            const spread = (Math.random() - 0.5) * 0.55;
+            fireBullet(m, 1, 16, 17 + Math.random() * 8, 10, spread);
           }
+          ctx.fx.floatText?.(m.x, m.y - 30, 'SPRAY!', '#ffb020');
+          ctx.shake = Math.max(ctx.shake || 0, 1.1);
         }
         break;
       case 'bat':
-        if (justPressed) melee(m, 70, 28, 16, 0.9);
+        if (justPressed) melee(m, 85, 34, 22, 1.2);
         break;
       case 'sledge':
-        if (justPressed) melee(m, 90, 48, 26, 1.4);
+        if (justPressed) melee(m, 110, 58, 34, 1.8);
         break;
       case 'chainsaw':
         if (isDown) {
@@ -218,29 +220,30 @@ export function createToolSystem(ctx) {
 
   function explode(x, y, radius, dmg) {
     ctx.sfx.explode();
-    ctx.fx.flash(x, y, radius * 1.15, 'rgba(255,160,60,0.6)', 0.28);
-    ctx.fx.smoke(x, y, 18);
-    ctx.fx.fire(x, y, 22);
-    ctx.fx.sparks(x, y, 24);
-    ctx.fx.gib(x, y, 10);
-    ctx.shake = Math.max(ctx.shake || 0, 2.2);
-    ctx.stats.chaos += 100;
-    ctx.triggerSlowMo?.(0.4, 0.35);
-    ctx.registerHit?.(40, { x, y });
+    ctx.fx.flash(x, y, radius * 1.35, 'rgba(255,160,60,0.7)', 0.32);
+    ctx.fx.smoke(x, y, 24);
+    ctx.fx.fire(x, y, 30);
+    ctx.fx.sparks(x, y, 36);
+    ctx.fx.gib(x, y, 14);
+    ctx.fx.floatText?.(x, y - 40, 'BOOM!', '#ffb020', 1.25);
+    ctx.shake = Math.max(ctx.shake || 0, 2.8);
+    ctx.stats.chaos += 140;
+    ctx.triggerSlowMo?.(0.35, 0.45);
+    ctx.registerHit?.(50, { x, y });
 
     for (const b of ctx.world.bodies) {
       if (b.isStatic && b.label !== 'spike') continue;
       const d = Vector.magnitude(Vector.sub(b.position, { x, y }));
       if (d > radius || d < 0.1) continue;
       const falloff = 1 - d / radius;
-      const force = falloff * 0.11;
+      const force = falloff * 0.15;
       const dir = Vector.normalise(Vector.sub(b.position, { x, y }));
-      Body.applyForce(b, b.position, { x: dir.x * force, y: dir.y * force - 0.015 });
-      Body.setAngularVelocity(b, b.angularVelocity + (Math.random() - 0.5) * 0.4 * falloff);
+      Body.applyForce(b, b.position, { x: dir.x * force, y: dir.y * force - 0.022 });
+      Body.setAngularVelocity(b, b.angularVelocity + (Math.random() - 0.5) * 0.55 * falloff);
       if (b.plugin?.person) {
         ctx.damagePart(b.plugin.person, b.plugin.part, dmg * falloff, b.position, ctx);
-        if (falloff > 0.5 && Math.random() < 0.4) {
-          b.plugin.person.onFire = Math.max(b.plugin.person.onFire, 2.2 + Math.random() * 2);
+        if (falloff > 0.4 && Math.random() < 0.55) {
+          b.plugin.person.onFire = Math.max(b.plugin.person.onFire, 2.8 + Math.random() * 2.5);
         }
       }
     }
@@ -322,13 +325,15 @@ export function createToolSystem(ctx) {
 
   function lightning(m) {
     ctx.sfx.zap();
-    ctx.fx.flash(m.x, m.y, 120, 'rgba(180,220,255,0.5)', 0.2);
+    ctx.fx.flash(m.x, m.y, 160, 'rgba(180,220,255,0.6)', 0.25);
+    ctx.fx.floatText?.(m.x, m.y - 50, 'ZAP!', '#a8e7ff', 1.2);
+    ctx.shake = Math.max(ctx.shake || 0, 1.4);
     beams.push({
       x1: m.x + (Math.random() - 0.5) * 40,
       y1: ctx.cam.y - 20,
       x2: m.x,
       y2: m.y,
-      life: 0.15,
+      life: 0.18,
       color: '#a8e7ff',
       jagged: true,
     });
@@ -337,35 +342,34 @@ export function createToolSystem(ctx) {
       const t = person.parts.torso || person.parts.head;
       if (!t) continue;
       const d = Vector.magnitude(Vector.sub(t.position, m));
-      if (d < 160) targets.push({ person, body: t, d });
+      if (d < 260) targets.push({ person, body: t, d });
     }
     targets.sort((a, b) => a.d - b.d);
     let prev = m;
-    for (const t of targets.slice(0, 4)) {
+    for (const t of targets.slice(0, 7)) {
       beams.push({
         x1: prev.x, y1: prev.y,
         x2: t.body.position.x, y2: t.body.position.y,
-        life: 0.12, color: '#7fd0ff', jagged: true,
+        life: 0.14, color: '#7fd0ff', jagged: true,
       });
       for (const [name, body] of Object.entries(t.person.parts)) {
-        ctx.damagePart(t.person, name, 14, body.position, ctx);
+        ctx.damagePart(t.person, name, 18, body.position, ctx);
         Body.applyForce(body, body.position, {
-          x: (Math.random() - 0.5) * 0.01,
-          y: -0.008,
+          x: (Math.random() - 0.5) * 0.014,
+          y: -0.012,
         });
       }
-      t.person.onFire = Math.max(t.person.onFire, 0.8);
+      t.person.onFire = Math.max(t.person.onFire, 1.2);
       prev = t.body.position;
-      ctx.fx.sparks(t.body.position.x, t.body.position.y, 10);
+      ctx.fx.sparks(t.body.position.x, t.body.position.y, 14);
     }
-    // ground zap damage at cursor
     const hit = Query.region(ctx.world.bodies, {
-      min: { x: m.x - 50, y: m.y - 50 },
-      max: { x: m.x + 50, y: m.y + 50 },
+      min: { x: m.x - 70, y: m.y - 70 },
+      max: { x: m.x + 70, y: m.y + 70 },
     });
     for (const b of hit) {
       if (b.plugin?.person) {
-        ctx.damagePart(b.plugin.person, b.plugin.part, 22, b.position, ctx);
+        ctx.damagePart(b.plugin.person, b.plugin.part, 28, b.position, ctx);
       }
     }
   }
@@ -426,13 +430,15 @@ export function createToolSystem(ctx) {
     ctx.sfx.zap();
     const hole = {
       x: m.x, y: m.y,
-      life: 2.2,
-      r: 160,
+      life: 3.0,
+      r: 210,
       pull: true,
     };
     hazards.push(hole);
-    ctx.fx.floatText(m.x, m.y - 20, 'SINGULARITY', '#c44dff');
-    ctx.stats.chaos += 50;
+    ctx.fx.floatText(m.x, m.y - 20, 'SINGULARITY', '#c44dff', 1.3);
+    ctx.fx.flash(m.x, m.y, 100, 'rgba(160,40,255,0.45)', 0.2);
+    ctx.shake = Math.max(ctx.shake || 0, 1.5);
+    ctx.stats.chaos += 80;
   }
 
   function update(dt) {

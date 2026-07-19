@@ -38,6 +38,11 @@
       </div>
     </header>
 
+    <div id="map-bar">
+      <div class="map-current"><span id="map-label">🏭 GULAG BASEMENT</span></div>
+      <div id="map-row" class="map-row" role="toolbar" aria-label="Maps"></div>
+    </div>
+
     <div id="stage-wrap">
       <canvas id="c"></canvas>
       <div id="loading" class="loading">OPENING THE GULAG…</div>
@@ -54,14 +59,14 @@
             Grab. Throw. Sever. Document the suffering.
           </p>
           <button type="button" id="btn-enter" class="btn-enter">REPORT FOR DUTY</button>
-          <p class="title-keys desktop-only">Middle-drag pan · Scroll zoom · Right-drag grab · Left-click tools</p>
+          <p class="title-keys desktop-only">Middle-drag pan · Scroll zoom · Right-drag grab · H = reset camera</p>
           <p class="title-keys touch-only">1 finger: tool / grab · 2 fingers: pan + pinch zoom · Toolbar below</p>
         </div>
       </div>
 
       <div id="combo" class="combo hidden"><b>x2</b><span>COMBO</span></div>
       <div id="hint" class="hint desktop-only">
-        <b>Middle-drag</b> pan · <b>Scroll</b> zoom · <b>Right-drag</b> grab · <b>Left-click</b> tool
+        <b>Middle-drag</b> pan · <b>Scroll</b> zoom · <b>H</b> reset cam · <b>Right-drag</b> grab
       </div>
       <div id="hint-touch" class="hint touch-only">
         <b>1 finger</b> tool/grab · <b>2 fingers</b> pan + pinch · pick tools below
