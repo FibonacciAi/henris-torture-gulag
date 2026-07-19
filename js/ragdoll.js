@@ -51,8 +51,15 @@ function partOpts(label, personId, group, kind) {
   };
 }
 
-/** Hard cap — each inmate is ~10 bodies + joints. Beyond this FPS dies. */
-export const MAX_INMATES = 28;
+/**
+ * Hard cap — each inmate is ~10 bodies + joints + stabilizers.
+ * Desktop can hold a bit more; touch/iPad stays lower.
+ */
+export const MAX_INMATES = (typeof navigator !== 'undefined' && (
+  /iPad|iPhone|iPod/.test(navigator.userAgent || '')
+  || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1)
+  || (() => { try { return matchMedia('(hover: none) and (pointer: coarse)').matches; } catch { return false; } })()
+)) ? 16 : 22;
 
 export function removePerson(world, person, people, stats) {
   if (!person || person._removed) return;
@@ -148,12 +155,11 @@ export function createRagdoll(world, x, y, stats, options = null) {
   joint(upperLegL, lowerLegL, 0, 14 * scale, 0, -13 * scale, 1, 0.82, 0.16);
   joint(upperLegR, lowerLegR, 0, 14 * scale, 0, -13 * scale, 1, 0.82, 0.16);
 
+  // Fewer stabilizers = much cheaper solver under crowd load
   const stabilizers = [
-    joint(head, torso, -7 * scale, 4 * scale, -10 * scale, -12 * scale, 14, 0.12, 0.06),
-    joint(head, torso, 7 * scale, 4 * scale, 10 * scale, -12 * scale, 14, 0.12, 0.06),
-    joint(upperLegL, upperLegR, 0, 0, 0, 0, 22, 0.08, 0.05),
-    joint(torso, lowerLegL, -10 * scale, 22 * scale, 0, 0, 52, 0.05, 0.04),
-    joint(torso, lowerLegR, 10 * scale, 22 * scale, 0, 0, 52, 0.05, 0.04),
+    joint(head, torso, -7 * scale, 4 * scale, -10 * scale, -12 * scale, 14, 0.1, 0.05),
+    joint(head, torso, 7 * scale, 4 * scale, 10 * scale, -12 * scale, 14, 0.1, 0.05),
+    joint(upperLegL, upperLegR, 0, 0, 0, 0, 22, 0.06, 0.04),
   ];
 
   const hp = {};
@@ -199,6 +205,8 @@ export function createRagdoll(world, x, y, stats, options = null) {
 
   for (const b of Object.values(parts)) {
     b.plugin = { person, part: b.label };
+    // Sleep sooner when crowded so settled piles cost almost nothing
+    b.sleepThreshold = 28;
     Body.setAngle(b, 0);
     Body.setAngularVelocity(b, 0);
     Body.setVelocity(b, { x: 0, y: 0 });
@@ -554,21 +562,28 @@ export function applyImpactDamage(pair, ctx) {
 
 export function updatePeople(people, dt, ctx) {
   const n = people.length;
-  const heavy = n > 14;
-  const bleedChance = heavy ? 0.18 : 0.5;
-  const fireChance = heavy ? 0.12 : 0.35;
+  const heavy = n > 10;
+  const extreme = n > 16;
+  const bleedChance = extreme ? 0.08 : heavy ? 0.15 : 0.45;
+  const fireChance = extreme ? 0.08 : heavy ? 0.12 : 0.35;
+  // Standing every frame at high N is expensive — stagger
+  const standEvery = extreme ? 3 : heavy ? 2 : 1;
+  const frame = (ctx._frameCount || 0);
 
-  for (const person of people) {
+  for (let pi = 0; pi < people.length; pi++) {
+    const person = people[pi];
     if (person._removed) continue;
 
-    // Standing / balance (cheap; always)
-    applyStanding(person, dt, ctx);
+    // Standing / balance (stagger under load)
+    if (person.alive && (frame + person.id) % standEvery === 0) {
+      applyStanding(person, dt * standEvery, ctx);
+    }
 
-    // Balloon / alien float drift
-    if (person.alive && person.floaty && person.parts.torso) {
+    // Balloon / alien float drift — skip when extreme
+    if (!extreme && person.alive && person.floaty && person.parts.torso) {
       const t = person.parts.torso;
       Body.applyForce(t, t.position, {
-        x: Math.sin((person.id + performance.now() * 0.001) * 1.7) * 0.00015,
+        x: Math.sin((person.id + frame * 0.05) * 1.7) * 0.00015,
         y: -0.00055 * (person.kindId === 'balloon' ? 1.2 : 0.7),
       });
     }
@@ -578,16 +593,18 @@ export function updatePeople(people, dt, ctx) {
       person.onFire -= dt;
       const torso = person.parts.torso;
       if (torso && Math.random() < fireChance) {
-        if (!heavy || Math.random() < 0.5) {
-          ctx.fx.fire(torso.position.x + (Math.random() - 0.5) * 16, torso.position.y + (Math.random() - 0.5) * 20, heavy ? 2 : 4);
+        if (!heavy || Math.random() < 0.4) {
+          ctx.fx.fire(torso.position.x + (Math.random() - 0.5) * 16, torso.position.y + (Math.random() - 0.5) * 20, extreme ? 1 : heavy ? 2 : 4);
         }
-        damagePart(person, pick(Object.keys(person.parts)), 3 + Math.random() * 4, torso.position, ctx);
+        if (!extreme || Math.random() < 0.5) {
+          damagePart(person, pick(Object.keys(person.parts)), 3 + Math.random() * 4, torso.position, ctx);
+        }
         stunPerson(person, 0.8);
       }
     }
 
     // bleeding — throttle hard under load
-    if (person.bleeds.length && (!heavy || Math.random() < 0.4)) {
+    if (person.bleeds.length && (!heavy || Math.random() < 0.3)) {
       for (let i = person.bleeds.length - 1; i >= 0; i--) {
         const bl = person.bleeds[i];
         bl.t -= dt;
@@ -596,8 +613,8 @@ export function updatePeople(people, dt, ctx) {
         if (!body) continue;
         if (Math.random() < bleedChance) {
           if (!heavy) ctx.fx.blood(body.position.x, body.position.y, 2, 40);
-          else if (Math.random() < 0.25) ctx.fx.decal?.(body.position.x, ctx.floorY - 2, 6);
-          if (person.alive && Math.random() < 0.12) {
+          else if (Math.random() < 0.2) ctx.fx.decal?.(body.position.x, ctx.floorY - 2, 6);
+          if (person.alive && Math.random() < 0.1) {
             damagePart(person, bl.part, 0.8, body.position, ctx);
           }
         }
@@ -605,27 +622,31 @@ export function updatePeople(people, dt, ctx) {
     }
 
     // Cap bleed list
-    if (person.bleeds.length > 4) person.bleeds.length = 4;
+    if (person.bleeds.length > (extreme ? 2 : 4)) person.bleeds.length = extreme ? 2 : 4;
   }
 }
 
 /**
  * Hard stop floor tunneling after big flings.
- * Caps speed + clamps any limb that sank through the floor slab.
+ * Caps speed + clamps limbs that sank through the floor.
+ * Under load: only check high-speed / low bodies.
  */
 export function preventFloorTunnel(people, floorY, maxSpeed = 42) {
+  const n = people.length;
+  const light = n > 14;
   for (const person of people) {
     if (person._removed) continue;
     for (const b of Object.values(person.parts)) {
-      if (!b) continue;
+      if (!b || b.isSleeping) continue;
       const vx = b.velocity.x;
       const vy = b.velocity.y;
+      // Cheap reject: settled body well above floor
+      if (light && vy < 4 && b.position.y < floorY - 40) continue;
       const spd = Math.hypot(vx, vy);
       if (spd > maxSpeed) {
         const s = maxSpeed / spd;
         Body.setVelocity(b, { x: vx * s, y: vy * s });
       }
-      // Approximate body half-height from bounds
       const halfH = Math.max(6, (b.bounds.max.y - b.bounds.min.y) * 0.45);
       const maxY = floorY - halfH - 1;
       if (b.position.y > maxY) {
@@ -654,9 +675,9 @@ export function drawPeople(ctx2d, people, cam, view) {
   const n = people.length;
   const viewW = view?.w ?? 1200;
   const viewH = view?.h ?? 800;
-  const drawShadows = n <= 10;
-  // Drop accessory washes earlier — iPad chokes on offscreen tint per limb
-  const simple = n > 12;
+  const drawShadows = n <= 6;
+  // Drop accessory washes early — offscreen tint per limb kills FPS
+  const simple = n > 8;
 
   for (const person of people) {
     if (person._removed) continue;

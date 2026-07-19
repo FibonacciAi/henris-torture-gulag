@@ -11,23 +11,23 @@ export function createFx() {
   let quality = 1; // 0.25–1 scales spawn counts
 
   function setLoad(inmateCount) {
-    // Scale FX budget with world pressure
-    if (inmateCount > 22) {
-      quality = 0.25;
-      maxParticles = 90;
-      maxDecals = 50;
-    } else if (inmateCount > 16) {
-      quality = 0.4;
+    // Scale FX budget hard — particles are freezes #2 after physics
+    if (inmateCount > 16) {
+      quality = 0.18;
+      maxParticles = 50;
+      maxDecals = 30;
+    } else if (inmateCount > 12) {
+      quality = 0.3;
+      maxParticles = 80;
+      maxDecals = 45;
+    } else if (inmateCount > 8) {
+      quality = 0.5;
       maxParticles = 140;
       maxDecals = 70;
-    } else if (inmateCount > 10) {
-      quality = 0.65;
-      maxParticles = 200;
-      maxDecals = 100;
     } else {
       quality = 1;
-      maxParticles = 280;
-      maxDecals = 120;
+      maxParticles = 240;
+      maxDecals = 100;
     }
     while (particles.length > maxParticles) particles.shift();
     while (decals.length > maxDecals) decals.shift();

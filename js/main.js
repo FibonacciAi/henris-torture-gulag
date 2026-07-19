@@ -336,10 +336,10 @@ function spawnPerson(x, y, quiet = false, kindId = null) {
     floorY: ctx.floorY,
   });
   people.push(p);
-  ctx.fx.setLoad?.(people.length);
-  tunePhysics();
-  syncStats();
   if (!quiet) {
+    ctx.fx.setLoad?.(people.length);
+    tunePhysics();
+    syncStats();
     sfx.spawn();
     const label = `${p.kindEmoji || ''} ${p.kindName || 'INMATE'}`.trim();
     toast(label);
@@ -358,10 +358,12 @@ function spawnCrowd(n = 8) {
   lastBatchAt = now;
 
   if (people.length >= MAX_INMATES) {
-    ensureCapacity(world, people, stats, Math.min(n, 8));
+    ensureCapacity(world, people, stats, Math.min(n, 6));
   }
   const room = Math.max(0, MAX_INMATES - people.length);
-  const count = Math.min(n, room, 8);
+  // Smaller batches when crowded — avoids one-frame spawn freezes
+  const batchMax = people.length > 12 ? 4 : people.length > 8 ? 6 : 8;
+  const count = Math.min(n, room, batchMax);
   if (count <= 0) {
     toast(`FULL (${MAX_INMATES})`);
     return;
@@ -377,23 +379,31 @@ function spawnCrowd(n = 8) {
   toast(count < n ? `BATCH ${count}  ${mix}` : `CREW ×${count}  ${mix}`);
   ctx.fx.setLoad?.(people.length);
   tunePhysics();
+  syncStats();
   focusSpawnCam(false);
 }
 
 function tunePhysics() {
   const n = people.length;
-  // Keep collision quality high enough that flings don't tunnel the floor.
-  // Still scale down a bit under crowd load.
-  if (n > 20) {
-    engine.positionIterations = 5;
-    engine.velocityIterations = 4;
+  // Solver cost dominates — drop iterations hard as bodies pile up
+  if (n > 16) {
+    engine.positionIterations = 2;
+    engine.velocityIterations = 2;
+    engine.constraintIterations = 1;
   } else if (n > 12) {
-    engine.positionIterations = 6;
-    engine.velocityIterations = 5;
+    engine.positionIterations = 3;
+    engine.velocityIterations = 2;
+    engine.constraintIterations = 1;
+  } else if (n > 8) {
+    engine.positionIterations = 4;
+    engine.velocityIterations = 3;
+    engine.constraintIterations = 2;
   } else {
-    engine.positionIterations = 8;
-    engine.velocityIterations = 6;
+    engine.positionIterations = 6;
+    engine.velocityIterations = 4;
+    engine.constraintIterations = 2;
   }
+  engine.enableSleeping = true;
 }
 
 function syncMapUI() {
@@ -427,11 +437,14 @@ function buildMapPicker() {
 
 /** Cull long-dead bodies when crowded so BATCH spam stays playable. */
 function cullStaleCorpses() {
-  if (people.length < MAX_INMATES * 0.7) return;
   const now = performance.now();
+  // Under pressure, recycle corpses faster to free solver budget
+  const pressure = people.length / Math.max(1, MAX_INMATES);
+  const maxAge = pressure > 0.85 ? 8000 : pressure > 0.6 ? 14000 : 25000;
+  if (pressure < 0.45) return;
   for (let i = people.length - 1; i >= 0; i--) {
     const p = people[i];
-    if (!p.alive && p.deadAt && now - p.deadAt > 25000) {
+    if (!p.alive && p.deadAt && now - p.deadAt > maxAge) {
       removePerson(world, p, people, stats);
     }
   }
@@ -1013,9 +1026,12 @@ function frame(now) {
     if (keys.BracketLeft) zoomAt(ctx.W / 2, ctx.H / 2, ctx.zoom * Math.exp(-dt * 1.1));
     clampCam();
 
+    ctx._frameCount = frameCount;
     Engine.update(engine, (1000 / 60) * timeScale);
-    // Hard clamp after physics — flings never sink through the floor
-    preventFloorTunnel(people, ctx.floorY, currentMap?.id === 'moon' ? 55 : 42);
+    // Floor clamp every frame when few; every other when crowded
+    if (people.length <= 12 || (frameCount & 1) === 0) {
+      preventFloorTunnel(people, ctx.floorY, currentMap?.id === 'moon' ? 55 : 42);
+    }
 
     if (leftDown && TOOLS[toolIndex].id !== 'hand') {
       ctx.tools.use(TOOLS[toolIndex].id, true, false);
@@ -1024,8 +1040,8 @@ function frame(now) {
     updatePeople(people, simDt, ctx);
     ctx.fx.update(simDt, ctx.floorY);
 
-    // Periodic corpse cull under pressure
-    if ((frameCount & 63) === 0) cullStaleCorpses();
+    // Cull corpses faster under pressure
+    if ((frameCount & 31) === 0) cullStaleCorpses();
   }
 
   if (ctx.shake > 0) ctx.shake = Math.max(0, ctx.shake - dt * 3.2);

@@ -219,33 +219,45 @@ export function createToolSystem(ctx) {
   }
 
   function explode(x, y, radius, dmg) {
+    const load = ctx.people?.length || 0;
     ctx.sfx.explode();
-    ctx.fx.flash(x, y, radius * 1.35, 'rgba(255,160,60,0.7)', 0.32);
-    ctx.fx.smoke(x, y, 24);
-    ctx.fx.fire(x, y, 30);
-    ctx.fx.sparks(x, y, 36);
-    ctx.fx.gib(x, y, 14);
-    ctx.fx.floatText?.(x, y - 40, 'BOOM!', '#ffb020', 1.25);
-    ctx.shake = Math.max(ctx.shake || 0, 2.8);
+    ctx.fx.flash(x, y, radius * (load > 14 ? 1.0 : 1.35), 'rgba(255,160,60,0.7)', 0.28);
+    ctx.fx.smoke(x, y, load > 14 ? 10 : 24);
+    ctx.fx.fire(x, y, load > 14 ? 12 : 30);
+    ctx.fx.sparks(x, y, load > 14 ? 12 : 36);
+    if (load <= 14) ctx.fx.gib(x, y, 14);
+    if (load <= 18) ctx.fx.floatText?.(x, y - 40, 'BOOM!', '#ffb020', 1.25);
+    ctx.shake = Math.max(ctx.shake || 0, load > 14 ? 1.4 : 2.8);
     ctx.stats.chaos += 140;
-    ctx.triggerSlowMo?.(0.35, 0.45);
+    if (load <= 16) ctx.triggerSlowMo?.(0.35, 0.45);
     ctx.registerHit?.(50, { x, y });
 
-    for (const b of ctx.world.bodies) {
-      if (b.isStatic && b.label !== 'spike') continue;
+    // Only blast person parts (not every static prop / wall)
+    for (const person of ctx.people) {
+      if (person._removed) continue;
+      for (const b of Object.values(person.parts)) {
+        if (!b) continue;
+        const d = Vector.magnitude(Vector.sub(b.position, { x, y }));
+        if (d > radius || d < 0.1) continue;
+        const falloff = 1 - d / radius;
+        const force = falloff * 0.15;
+        const dir = Vector.normalise(Vector.sub(b.position, { x, y }));
+        Body.applyForce(b, b.position, { x: dir.x * force, y: dir.y * force - 0.022 });
+        Body.setAngularVelocity(b, b.angularVelocity + (Math.random() - 0.5) * 0.55 * falloff);
+        ctx.damagePart(person, b.plugin?.part || 'torso', dmg * falloff, b.position, ctx);
+        if (falloff > 0.4 && Math.random() < 0.55) {
+          person.onFire = Math.max(person.onFire, 2.8 + Math.random() * 2.5);
+        }
+      }
+    }
+    // Also kick projectiles lightly
+    for (const b of projectiles) {
+      if (!b || b.isStatic) continue;
       const d = Vector.magnitude(Vector.sub(b.position, { x, y }));
       if (d > radius || d < 0.1) continue;
       const falloff = 1 - d / radius;
-      const force = falloff * 0.15;
       const dir = Vector.normalise(Vector.sub(b.position, { x, y }));
-      Body.applyForce(b, b.position, { x: dir.x * force, y: dir.y * force - 0.022 });
-      Body.setAngularVelocity(b, b.angularVelocity + (Math.random() - 0.5) * 0.55 * falloff);
-      if (b.plugin?.person) {
-        ctx.damagePart(b.plugin.person, b.plugin.part, dmg * falloff, b.position, ctx);
-        if (falloff > 0.4 && Math.random() < 0.55) {
-          b.plugin.person.onFire = Math.max(b.plugin.person.onFire, 2.8 + Math.random() * 2.5);
-        }
-      }
+      Body.applyForce(b, b.position, { x: dir.x * falloff * 0.1, y: dir.y * falloff * 0.1 - 0.01 });
     }
   }
 
@@ -442,13 +454,15 @@ export function createToolSystem(ctx) {
   }
 
   function update(dt) {
+    const load = ctx.people?.length || 0;
+    const extreme = load > 14;
+
     // projectiles
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const b = projectiles[i];
       const pl = b.plugin || {};
       if (pl.bullet) {
         pl.life -= dt;
-        // hit check
         const hits = Query.region(ctx.world.bodies, {
           min: { x: b.position.x - 8, y: b.position.y - 8 },
           max: { x: b.position.x + 8, y: b.position.y + 8 },
@@ -464,7 +478,7 @@ export function createToolSystem(ctx) {
               x: b.velocity.x * 0.0008,
               y: b.velocity.y * 0.0008,
             });
-            ctx.fx.blood(b.position.x, b.position.y, 8, 200);
+            if (!extreme) ctx.fx.blood(b.position.x, b.position.y, 8, 200);
             ctx.sfx.hit();
             dead = true;
             break;
@@ -480,7 +494,7 @@ export function createToolSystem(ctx) {
           x: Math.cos(b.angle) * 0.004,
           y: Math.sin(b.angle) * 0.004,
         });
-        ctx.fx.smoke(b.position.x, b.position.y, 1);
+        if (!extreme || (i & 1) === 0) ctx.fx.smoke(b.position.x, b.position.y, 1);
         const hits = Query.region(ctx.world.bodies, {
           min: { x: b.position.x - 12, y: b.position.y - 12 },
           max: { x: b.position.x + 12, y: b.position.y + 12 },
@@ -518,18 +532,19 @@ export function createToolSystem(ctx) {
     for (let i = hazards.length - 1; i >= 0; i--) {
       const h = hazards[i];
       if (h.pull) {
-        // black hole
         h.life -= dt;
-        ctx.fx.burst(h.x, h.y, '#c44dff', 2, 40, 0.3);
-        for (const b of ctx.world.bodies) {
-          if (b.isStatic) continue;
-          const d = Vector.magnitude(Vector.sub(b.position, h));
-          if (d > h.r || d < 4) continue;
-          const dir = Vector.normalise(Vector.sub(h, b.position));
-          const f = (1 - d / h.r) * 0.012;
-          Body.applyForce(b, b.position, { x: dir.x * f, y: dir.y * f });
-          if (b.plugin?.person && d < 40) {
-            ctx.damagePart(b.plugin.person, b.plugin.part, 8 * dt, b.position, ctx);
+        if (!extreme) ctx.fx.burst(h.x, h.y, '#c44dff', 2, 40, 0.3);
+        // Only pull person parts + projectiles — not every static prop
+        for (const person of ctx.people) {
+          if (person._removed) continue;
+          for (const b of Object.values(person.parts)) {
+            if (!b || b.isSleeping) continue;
+            const d = Vector.magnitude(Vector.sub(b.position, h));
+            if (d > h.r || d < 4) continue;
+            const dir = Vector.normalise(Vector.sub(h, b.position));
+            const f = (1 - d / h.r) * 0.012;
+            Body.applyForce(b, b.position, { x: dir.x * f, y: dir.y * f });
+            if (d < 40) ctx.damagePart(person, b.plugin?.part || 'torso', 8 * dt, b.position, ctx);
           }
         }
         if (h.life <= 0) {
@@ -564,20 +579,44 @@ export function createToolSystem(ctx) {
       if (beams[i].life <= 0) beams.splice(i, 1);
     }
 
-    // spike contact
-    for (const b of ctx.world.bodies) {
-      if (!b.plugin?.person) continue;
-      const near = Query.region(ctx.world.bodies, {
-        min: { x: b.position.x - 12, y: b.position.y - 12 },
-        max: { x: b.position.x + 12, y: b.position.y + 12 },
-      });
-      for (const o of near) {
-        if (o.plugin?.spike) {
-          ctx.damagePart(b.plugin.person, b.plugin.part, 25 * dt, b.position, ctx);
-          if (Math.random() < 0.1) ctx.fx.blood(b.position.x, b.position.y, 2, 30);
-        }
-        if (o.plugin?.anvil && Vector.magnitude(o.velocity) > 4) {
-          ctx.damagePart(b.plugin.person, b.plugin.part, 8, b.position, ctx);
+    // Spike / anvil contact — ONLY when those hazards exist.
+    // Old code Query.region'd every limb every frame → freeze at high inmate counts.
+    let hasSpikes = false;
+    let movingAnvils = false;
+    for (const h of hazards) {
+      if (h.plugin?.spike) hasSpikes = true;
+    }
+    for (const b of projectiles) {
+      if (b.plugin?.anvil && Vector.magnitude(b.velocity) > 4) movingAnvils = true;
+    }
+    if (hasSpikes || movingAnvils) {
+      // Sample people (torso + feet only) instead of every limb
+      const checkParts = ['torso', 'lowerLegL', 'lowerLegR', 'head'];
+      for (const person of ctx.people) {
+        if (person._removed) continue;
+        for (const name of checkParts) {
+          const b = person.parts[name];
+          if (!b || b.isSleeping) continue;
+          if (hasSpikes) {
+            const near = Query.region(ctx.world.bodies, {
+              min: { x: b.position.x - 14, y: b.position.y - 14 },
+              max: { x: b.position.x + 14, y: b.position.y + 14 },
+            });
+            for (const o of near) {
+              if (o.plugin?.spike) {
+                ctx.damagePart(person, name, 25 * dt, b.position, ctx);
+                if (!extreme && Math.random() < 0.08) ctx.fx.blood(b.position.x, b.position.y, 2, 30);
+              }
+            }
+          }
+          if (movingAnvils) {
+            for (const o of projectiles) {
+              if (!o.plugin?.anvil || Vector.magnitude(o.velocity) <= 4) continue;
+              if (Vector.magnitude(Vector.sub(o.position, b.position)) < 36) {
+                ctx.damagePart(person, name, 8, b.position, ctx);
+              }
+            }
+          }
         }
       }
     }
