@@ -356,12 +356,17 @@ html.touch-ui #c {
 }
 
 .title-logo {
-  width: 76px;
-  height: 76px;
-  border-radius: 4px;
+  width: min(220px, 48vw);
+  height: min(220px, 48vw);
+  border-radius: 14px;
   object-fit: cover;
-  margin-bottom: 14px;
-  border: 1px solid #5a4030;
+  margin: 0 auto 18px;
+  display: block;
+  border: 2px solid #6a5040;
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(201, 162, 39, 0.15),
+    inset 0 1px 0 rgba(255, 220, 180, 0.08);
 }
 
 .title-eyebrow {
@@ -744,6 +749,11 @@ html.touch-ui #app.playing .btn-cam {
     overflow: auto;
   }
   .title-card h2 { font-size: 22px; }
-  .title-logo { width: 48px; height: 48px; }
+  .title-logo {
+    width: min(140px, 36vw);
+    height: min(140px, 36vw);
+    border-radius: 10px;
+    margin-bottom: 10px;
+  }
   .btn-cam { width: 42px; height: 42px; bottom: 8px; right: 8px; }
 }
