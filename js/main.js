@@ -68,18 +68,27 @@ const ctx = {
   },
 };
 
-// Zoom — desktop a bit tighter; touch starts wider so floor + people fit the stage
+// iPadOS 13+ Safari often reports as Mac (hover:hover, pointer:fine) — detect real tablets.
 const isTouchPrimary = (() => {
   try {
-    return window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    const coarse = window.matchMedia('(pointer: coarse)').matches;
+    const noHover = window.matchMedia('(hover: none)').matches;
+    const ua = navigator.userAgent || '';
+    const iOS = /iPad|iPhone|iPod/.test(ua);
+    // iPadOS desktop UA: Macintosh + multi-touch
+    const iPadOS = navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1;
+    return (noHover && coarse) || iOS || iPadOS;
   } catch {
-    return false;
+    return (navigator.maxTouchPoints || 0) > 1;
   }
 })();
-const ZOOM_MIN = isTouchPrimary ? 0.55 : 0.7;
-const ZOOM_MAX = isTouchPrimary ? 1.8 : 2.0;
-const ZOOM_DEFAULT = isTouchPrimary ? 0.92 : 1.15;
+const ZOOM_MIN = isTouchPrimary ? 0.5 : 0.7;
+const ZOOM_MAX = isTouchPrimary ? 1.85 : 2.0;
+const ZOOM_DEFAULT = isTouchPrimary ? 0.88 : 1.15;
 ctx.zoom = ZOOM_DEFAULT;
+// Apply before first layout paint so compact iPad CSS hits
+document.documentElement.classList.toggle('touch-ui', isTouchPrimary);
+document.documentElement.classList.toggle('ipad-native', isTouchPrimary);
 
 let toastT = 0;
 function toast(msg) {
@@ -453,49 +462,77 @@ let toolPointerId = null; // finger/mouse firing continuous tools
 let panPointerId = null; // single-finger middle / alt pan
 let panAccum = 0; // drag distance before committing empty-space pan
 
-function resize() {
+function stagePixelSize() {
   const wrap = document.getElementById('stage-wrap');
-  if (!wrap || !canvas) return;
+  if (!wrap) return { w: window.innerWidth || 800, h: 400 };
   const rect = wrap.getBoundingClientRect();
-  let w = Math.max(1, Math.floor(rect.width));
-  let h = Math.max(1, Math.floor(rect.height));
-  // Fallback if layout hasn't resolved yet (common on iOS before paint)
-  if (h < 80) {
+  let w = Math.floor(rect.width);
+  let h = Math.floor(rect.height);
+  // iOS Safari: address bar / Safe Area can leave 0-height for a frame
+  if (h < 100 || w < 100) {
     const top = document.getElementById('topbar')?.offsetHeight || 0;
     const maps = document.getElementById('map-bar')?.offsetHeight || 0;
     const tools = document.getElementById('toolbar')?.offsetHeight || 0;
-    h = Math.max(180, Math.floor(window.innerHeight - top - maps - tools));
+    const vh = window.visualViewport?.height || window.innerHeight || 600;
+    const vw = window.visualViewport?.width || window.innerWidth || 800;
+    h = Math.max(160, Math.floor(vh - top - maps - tools));
+    w = Math.max(280, Math.floor(vw));
   }
-  if (w < 80) w = Math.max(320, Math.floor(window.innerWidth));
-  const dpr = Math.min(window.devicePixelRatio || 1, isTouchPrimary ? 1.75 : 2);
-  canvas.width = Math.floor(w * dpr);
-  canvas.height = Math.floor(h * dpr);
+  return { w, h };
+}
+
+function resize() {
+  if (!canvas || !ctx2d) return;
+  document.documentElement.classList.toggle('touch-ui', isTouchPrimary);
+  const { w, h } = stagePixelSize();
+  // iPad retina is expensive — cap DPR so Matter + gore stays smooth
+  const dpr = Math.min(window.devicePixelRatio || 1, isTouchPrimary ? 1.5 : 2);
+  if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
+    canvas.width = Math.floor(w * dpr);
+    canvas.height = Math.floor(h * dpr);
+  }
   canvas.style.width = `${w}px`;
   canvas.style.height = `${h}px`;
   ctx2d.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.W = w;
   ctx.H = h;
-  document.documentElement.classList.toggle('touch-ui', isTouchPrimary);
   if (!playing) focusSpawnCam(false);
   else clampCam();
 }
 window.addEventListener('resize', resize);
 window.addEventListener('orientationchange', () => {
-  setTimeout(() => {
-    resize();
-    if (playing) focusSpawnCam(false);
-  }, 200);
+  // iOS fires this before layout settles — sample a few times
+  setTimeout(resize, 50);
+  setTimeout(() => { resize(); if (playing) focusSpawnCam(true); }, 250);
+  setTimeout(resize, 600);
 });
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', () => resize());
+  window.visualViewport.addEventListener('scroll', () => resize());
 }
-// Class early so CSS compact layout applies before first paint measure
-document.documentElement.classList.toggle('touch-ui', isTouchPrimary);
+// Kill iOS rubber-band scroll on the document while playing
+document.addEventListener('touchmove', (e) => {
+  if (!playing) return;
+  // allow horizontal scroll on tool/map rows
+  const t = e.target;
+  if (t && (t.closest?.('.tool-row') || t.closest?.('.map-row') || t.closest?.('.stats'))) return;
+  if (t === canvas || canvas.contains?.(t) || t?.closest?.('#stage-wrap')) {
+    e.preventDefault();
+  }
+}, { passive: false });
 resize();
+// Second measure after fonts/layout
+requestAnimationFrame(() => requestAnimationFrame(resize));
 
 function canvasPos(e) {
   const r = canvas.getBoundingClientRect();
-  return { x: e.clientX - r.left, y: e.clientY - r.top };
+  // clientX/Y are viewport coords; getBoundingClientRect is too — works with iOS visualViewport
+  const x = (e.clientX != null ? e.clientX : e.pageX) - r.left;
+  const y = (e.clientY != null ? e.clientY : e.pageY) - r.top;
+  return {
+    x: Math.max(0, Math.min(r.width || ctx.W, x)),
+    y: Math.max(0, Math.min(r.height || ctx.H, y)),
+  };
 }
 
 function screenToWorld(sx, sy) {
@@ -1057,23 +1094,34 @@ function startPlay() {
   document.getElementById('title-screen')?.classList.add('hidden');
   document.getElementById('app')?.classList.add('playing');
   sfx.unlock();
-  // Layout reflow after title hide — remeasure then frame spawn (critical on iPad)
+  // iPad: title hide reflows grid — wait two frames, then size + spawn
   requestAnimationFrame(() => {
-    resize();
-    focusSpawnCam(true);
-    spawnCrowd(5);
-    toast(isTouchPrimary
-      ? '1 finger = tool · 2 fingers = pan/zoom'
-      : "WELCOME TO HENRI'S TORTURE GULAG");
+    requestAnimationFrame(() => {
+      resize();
+      focusSpawnCam(true);
+      spawnCrowd(5);
+      toast(isTouchPrimary
+        ? '1 finger tool · 2 fingers pan/zoom · ⌖ resets cam'
+        : "WELCOME TO HENRI'S TORTURE GULAG");
+      // One more late resize after iOS chrome settles
+      setTimeout(() => { resize(); focusSpawnCam(false); }, 300);
+    });
   });
 }
 
 document.getElementById('btn-cam')?.addEventListener('click', (e) => {
   e.preventDefault();
+  e.stopPropagation();
   if (!playing) return;
   sfx.unlock();
   focusSpawnCam(true);
   toast('CAMERA RESET');
+});
+// Also bind pointerup for iOS reliability
+document.getElementById('btn-cam')?.addEventListener('pointerup', (e) => {
+  if (e.pointerType === 'touch') {
+    e.preventDefault();
+  }
 });
 
 // boot

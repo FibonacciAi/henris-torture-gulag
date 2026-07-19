@@ -2,15 +2,28 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Henri's Gulag" />
   <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="format-detection" content="telephone=no" />
   <meta name="theme-color" content="#12100e" />
   <meta name="description" content="Henri's Torture Gulag — physics ragdoll sandbox. Grab, maim, explode. Works on iPad." />
   <title>HENRI'S TORTURE GULAG</title>
-  <link rel="stylesheet" href="css/style.css?v=9a3" />
+  <link rel="stylesheet" href="css/style.css?v=ipad4" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+  <script>
+    // Early iPadOS detect (before CSS paint) — iPadOS 13+ pretends to be Mac
+    (function () {
+      var ua = navigator.userAgent || '';
+      var iOS = /iPad|iPhone|iPod/.test(ua);
+      var iPadOS = navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1;
+      var coarse = false;
+      try { coarse = window.matchMedia('(hover: none) and (pointer: coarse)').matches; } catch (e) {}
+      if (iOS || iPadOS || coarse) document.documentElement.classList.add('touch-ui');
+    })();
+  </script>
 </head>
 <body>
   <div id="app">
@@ -85,6 +98,6 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
-  <script type="module" src="js/main.js?v=9a3"></script>
+  <script type="module" src="js/main.js?v=ipad4"></script>
 </body>
 </html>
