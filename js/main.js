@@ -455,17 +455,18 @@ let panAccum = 0; // drag distance before committing empty-space pan
 
 function resize() {
   const wrap = document.getElementById('stage-wrap');
-  if (!wrap) return;
+  if (!wrap || !canvas) return;
   const rect = wrap.getBoundingClientRect();
-  // Prefer visualViewport height on iOS Safari (address bar shows/hides)
-  const vv = window.visualViewport;
-  let w = rect.width;
-  let h = rect.height;
-  if (vv && isTouchPrimary) {
-    // stage-wrap already accounts for chrome; just don't trust 0 sizes
-    w = Math.max(w, 1);
-    h = Math.max(h, 1);
+  let w = Math.max(1, Math.floor(rect.width));
+  let h = Math.max(1, Math.floor(rect.height));
+  // Fallback if layout hasn't resolved yet (common on iOS before paint)
+  if (h < 80) {
+    const top = document.getElementById('topbar')?.offsetHeight || 0;
+    const maps = document.getElementById('map-bar')?.offsetHeight || 0;
+    const tools = document.getElementById('toolbar')?.offsetHeight || 0;
+    h = Math.max(180, Math.floor(window.innerHeight - top - maps - tools));
   }
+  if (w < 80) w = Math.max(320, Math.floor(window.innerWidth));
   const dpr = Math.min(window.devicePixelRatio || 1, isTouchPrimary ? 1.75 : 2);
   canvas.width = Math.floor(w * dpr);
   canvas.height = Math.floor(h * dpr);

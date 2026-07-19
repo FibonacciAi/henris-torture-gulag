@@ -17,10 +17,10 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
+  width: 100%;
   height: 100%;
   height: 100dvh;
-  min-height: 100%;
-  min-height: -webkit-fill-available;
+  margin: 0;
   background: var(--bg);
   color: var(--text);
   font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
@@ -30,29 +30,25 @@ html, body {
   -webkit-tap-highlight-color: transparent;
   touch-action: none;
   overscroll-behavior: none;
-  position: fixed;
-  inset: 0;
-  width: 100%;
 }
 
-/* Touch vs desktop helpers */
-.touch-only { display: none !important; }
+/* Touch vs desktop helpers — never use display:block !important (breaks flex/grid widgets) */
+.touch-only { display: none; }
 .desktop-only { display: initial; }
-html.touch-ui .touch-only { display: block !important; }
 html.touch-ui .desktop-only { display: none !important; }
 html.touch-ui .hint.touch-only {
-  display: block !important;
+  display: block;
   position: absolute;
   left: 50%;
   top: 10px;
   transform: translateX(-50%);
 }
+html.touch-ui .title-keys.touch-only { display: block; }
 
 #app {
+  width: 100%;
   height: 100%;
   height: 100dvh;
-  max-height: 100dvh;
-  max-height: -webkit-fill-available;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   overflow: hidden;
@@ -269,6 +265,8 @@ html.touch-ui .map-name { font-size: 10px; }
 #stage-wrap {
   position: relative;
   min-height: 0;
+  min-height: 180px;
+  height: 100%;
   background: #0e0c0a;
   overflow: hidden;
 }
@@ -562,7 +560,7 @@ html.touch-ui #c {
   font-size: 12px;
 }
 
-/* Floating camera reset (iPad) */
+/* Floating camera reset (iPad only, only while playing) */
 .btn-cam {
   display: none;
   position: absolute;
@@ -580,18 +578,10 @@ html.touch-ui #c {
   padding: 0;
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(0,0,0,0.45);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
+  place-items: center;
 }
-html.touch-ui.playing .btn-cam,
 html.touch-ui #app.playing .btn-cam {
   display: grid;
-  place-items: center;
-}
-html.touch-ui .btn-cam.touch-only { display: none; }
-html.touch-ui #app.playing .btn-cam.touch-only {
-  display: grid;
-  place-items: center;
 }
 
 /* ── Responsive / iPad ── */
